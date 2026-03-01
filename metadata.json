@@ -1,0 +1,7 @@
+{
+  "name": "TS-Viewer AI Plus 20260215　Preview",
+  "description": "A robust local image viewer supporting multiple formats with Gemini AI integration for image analysis.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
