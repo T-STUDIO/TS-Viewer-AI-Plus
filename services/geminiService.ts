@@ -7,21 +7,20 @@
  */
 
 const getApiKey = (): string => {
-  // 1. プラットフォーム標準およびユーザー指定の define 名を確認
-  const env = process.env as any;
-  if (env.API_KEY) return env.API_KEY;
-  if (env.GEMINI_API_KEY) return env.GEMINI_API_KEY;
-
-  // 2. ブラウザのグローバル空間（window.process）を確認
-  const globalProcess = (window as any).process;
-  if (globalProcess && globalProcess.env) {
-    if (globalProcess.env.API_KEY) return globalProcess.env.API_KEY;
-    if (globalProcess.env.GEMINI_API_KEY) return globalProcess.env.GEMINI_API_KEY;
-  }
-
-  // 3. Vite 標準の環境変数（import.meta.env）を確認
+  // 1. Vite 標準の環境変数（import.meta.env）を最優先
   const metaEnv = (import.meta as any).env;
   if (metaEnv && metaEnv.VITE_GEMINI_API_KEY) return metaEnv.VITE_GEMINI_API_KEY;
+
+  // 2. define で置換される process.env.GEMINI_API_KEY を確認
+  // 直接 process.env にアクセスせず、個別のプロパティを確認する
+  try {
+    if (typeof process !== 'undefined' && process.env) {
+      if ((process.env as any).GEMINI_API_KEY) return (process.env as any).GEMINI_API_KEY;
+      if ((process.env as any).API_KEY) return (process.env as any).API_KEY;
+    }
+  } catch (e) {
+    // process が定義されていない場合は無視
+  }
 
   return "";
 };
