@@ -11,6 +11,7 @@ import { AstrometryService, AnnotationObject } from '../services/solverService';
 import { calculateHistogram, drawHistogram, getLuminanceArray, applyLevels, getAutoLevels, HistogramData, createFeatheredMask } from '../services/imageProcessing';
 import { fetchWikiInfo, WikiInfo } from '../services/wikiService';
 import { findCelestialObject, CelestialObject } from '../services/objectDatabase';
+import { getProjectedConstellations } from '../services/constellations';
 
 interface PreviewModalProps {
   fileEntry: FileEntry | null;
@@ -473,6 +474,53 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({ fileEntry, isOpen, o
                             <text x={ann.pixelx - intrinsicSize.width/2 + 15/zoom} y={ann.pixely - intrinsicSize.height/2 - 15/zoom} fill={selectedAnnotation === ann ? "#60a5fa" : "#fbbf24"} fontSize={Math.max(12, 16/zoom)} className="font-black drop-shadow-xl select-none group-hover:fill-white transition-all" style={{ paintOrder: 'stroke', stroke: 'black', strokeWidth: 3/zoom }}>{ann.names[0]}</text>
                         </g>
                     ))}
+                    {metadata?.wcs && (() => {
+                        try {
+                          const projectedList = getProjectedConstellations(metadata.wcs, lang);
+                          return projectedList.map((c) => (
+                            <g key={c.id} className="opacity-75 pointer-events-none">
+                              {c.lines.map((line, idx) => (
+                                <line
+                                  key={idx}
+                                  x1={line.x1 - intrinsicSize.width / 2}
+                                  y1={line.y1 - intrinsicSize.height / 2}
+                                  x2={line.x2 - intrinsicSize.width / 2}
+                                  y2={line.y2 - intrinsicSize.height / 2}
+                                  stroke="#22d3ee"
+                                  strokeWidth={Math.max(1, 1.5 / zoom)}
+                                  strokeDasharray={`${Math.max(2, 4 / zoom)},${Math.max(2, 4 / zoom)}`}
+                                />
+                              ))}
+                              {c.starDots.map((dot, idx) => (
+                                <circle
+                                  key={idx}
+                                  cx={dot.x - intrinsicSize.width / 2}
+                                  cy={dot.y - intrinsicSize.height / 2}
+                                  r={Math.max(2, 3 / zoom)}
+                                  fill="#22d3ee"
+                                />
+                              ))}
+                              {c.center && (
+                                <text
+                                  x={c.center.x - intrinsicSize.width / 2}
+                                  y={c.center.y - intrinsicSize.height / 2}
+                                  fill="#22d3ee"
+                                  fontSize={Math.max(11, 14 / zoom)}
+                                  fontWeight="black"
+                                  textAnchor="middle"
+                                  className="select-none opacity-90"
+                                  style={{ paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.8)', strokeWidth: Math.max(1, 2.7 / zoom) }}
+                                >
+                                  {c.name}
+                                </text>
+                              )}
+                            </g>
+                          ));
+                        } catch (err) {
+                          console.debug("Constellation projection error:", err);
+                          return null;
+                        }
+                    })()}
                     {searchedObject && searchedObject.pixelx !== undefined && searchedObject.pixely !== undefined && (
                         <g className="pointer-events-auto cursor-pointer" onClick={(e) => { e.stopPropagation(); handleSelectObject({ ...searchedObject, names: [searchedObject.name] } as any); }}>
                             <path d={`M ${searchedObject.pixelx - intrinsicSize.width/2 - 20/zoom} ${searchedObject.pixely - intrinsicSize.height/2} L ${searchedObject.pixelx - intrinsicSize.width/2 + 20/zoom} ${searchedObject.pixely - intrinsicSize.height/2} M ${searchedObject.pixelx - intrinsicSize.width/2} ${searchedObject.pixely - intrinsicSize.height/2 - 20/zoom} L ${searchedObject.pixelx - intrinsicSize.width/2} ${searchedObject.pixely - intrinsicSize.height/2 + 20/zoom}`} stroke="#3b82f6" strokeWidth={4/zoom} />
@@ -600,17 +648,19 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({ fileEntry, isOpen, o
                               <div className="flex bg-black/40 p-1 rounded-2xl border border-white/5">
                                   {['remote','local'].map(st => <button key={st} onClick={() => setSolverType(st as any)} className={`flex-1 py-3 rounded-xl text-[9px] font-black uppercase transition-all ${solverType===st?'bg-blue-600 text-white shadow-lg':'text-gray-500'}`}>{st === 'remote' ? 'リモート' : 'ローカル'}</button>)}
                               </div>
-                              {annotations.length > 0 && (
+                              {metadata?.wcs && (
                                   <div className="space-y-3">
                                       <button onClick={() => setShowAnnotations(!showAnnotations)} className={`w-full py-3 rounded-xl border border-white/10 text-[9px] font-black uppercase flex items-center justify-center gap-2 transition-all ${showAnnotations ? 'bg-yellow-600/20 text-yellow-400' : 'bg-white/5 text-gray-400'}`}>
                                           {showAnnotations ? <Eye size={14}/> : <EyeOff size={14}/>}
                                           {t.showAnnotations} ({annotations.length})
                                       </button>
-                                      <div className="grid grid-cols-1 gap-1.5 max-h-48 overflow-y-auto pr-1 no-scrollbar">
-                                          {annotations.map((ann, i) => (
-                                              <button key={i} onClick={() => handleSelectObject(ann)} className={`px-4 py-2 rounded-lg text-left text-[9px] font-black uppercase transition-all ${selectedAnnotation === ann ? 'bg-blue-600 text-white' : 'bg-white/5 hover:bg-white/10 text-gray-400'}`}>{ann.names[0]}</button>
-                                          ))}
-                                      </div>
+                                      {annotations.length > 0 && (
+                                          <div className="grid grid-cols-1 gap-1.5 max-h-48 overflow-y-auto pr-1 no-scrollbar">
+                                              {annotations.map((ann, i) => (
+                                                  <button key={i} onClick={() => handleSelectObject(ann)} className={`px-4 py-2 rounded-lg text-left text-[9px] font-black uppercase transition-all ${selectedAnnotation === ann ? 'bg-blue-600 text-white' : 'bg-white/5 hover:bg-white/10 text-gray-400'}`}>{ann.names[0]}</button>
+                                              ))}
+                                          </div>
+                                      )}
                                   </div>
                               )}
                               <div className="space-y-4">
