@@ -54,6 +54,77 @@ const App: React.FC = () => {
 
   useEffect(() => { if (!('showDirectoryPicker' in window)) setIsNativeSupported(false); }, []);
 
+  // --- バックグラウンドフォルダ監視 (自動同期機能) ---
+  useEffect(() => {
+    if (!dirHandle || !isNativeSupported || isMobile) return;
+
+    const currentActiveHandle = path[path.length - 1]?.handle || dirHandle;
+    if (!currentActiveHandle || currentActiveHandle.kind !== 'directory') return;
+
+    const intervalId = setInterval(async () => {
+      try {
+        let scannedNames = new Set<string>();
+        let scannedEntries: FileSystemHandle[] = [];
+        
+        for await (const entry of (currentActiveHandle as FileSystemDirectoryHandle).values()) {
+          scannedNames.add(entry.name);
+          scannedEntries.push(entry);
+        }
+
+        const currentNames = new Set(entries.map(e => e.name));
+
+        // 追加または削除されたファイルの有無を厳密にチェック
+        let hasChanges = false;
+        if (scannedNames.size !== currentNames.size) {
+          hasChanges = true;
+        } else {
+          for (const name of scannedNames) {
+            if (!currentNames.has(name)) {
+              hasChanges = true;
+              break;
+            }
+          }
+        }
+
+        // 変化が検出された場合のみ静かに一覧を再描画
+        if (hasChanges) {
+          let newEntries: (FileEntry | DirectoryEntry)[] = [];
+          for (const entry of scannedEntries) {
+            if (entry.kind === 'directory') {
+              newEntries.push({ id: entry.name, handle: entry as FileSystemDirectoryHandle, name: entry.name });
+            } else {
+              const ext = entry.name.split('.').pop()?.toLowerCase() || '';
+              if (SUPPORTED_EXTENSIONS.includes(ext as SupportedExtension)) {
+                let type: 'image' | 'video' | 'pdf' | 'unsupported' = 'unsupported';
+                if (MIME_TYPES[ext]?.startsWith('image/') || ['fits','fit','psd','ai','tiff','tif','bmp','heic'].includes(ext)) {
+                  type = 'image';
+                } else if (MIME_TYPES[ext]?.startsWith('video/')) {
+                  type = 'video';
+                } else if (ext === 'pdf') {
+                  type = 'pdf';
+                }
+                newEntries.push({ id: entry.name, handle: entry as FileSystemFileHandle, name: entry.name, extension: ext, type });
+              }
+            }
+          }
+          newEntries.sort((a, b) => {
+            const aIsDir = a.handle.kind === 'directory';
+            const bIsDir = b.handle.kind === 'directory';
+            if (aIsDir && !bIsDir) return -1;
+            if (!aIsDir && bIsDir) return 1;
+            return a.name.localeCompare(b.name);
+          });
+          setEntries(newEntries);
+        }
+      } catch (err) {
+        // バックグラウンドスキャンのため、エラーは画面を止めずにコンソールのみキャッチします
+        console.debug("Background watch skip/error:", err);
+      }
+    }, 4000); // 4秒おきにチェック
+
+    return () => clearInterval(intervalId);
+  }, [dirHandle, path, entries, isNativeSupported, isMobile]);
+
   const scanDirectory = async (handle: FileSystemDirectoryHandle) => {
     setLoading(true);
     let newEntries: (FileEntry | DirectoryEntry)[] = [];
