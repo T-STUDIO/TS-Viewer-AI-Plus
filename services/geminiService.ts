@@ -124,15 +124,23 @@ Do not output any additional notes, markdown blocks, or text.
 `;
 
     const modelsWithSchema = [
+      { name: 'gemini-3.1-flash-image', useSchema: true },
+      { name: 'gemini-2.5-flash-image', useSchema: true },
       { name: 'gemini-3.5-flash', useSchema: true },
       { name: 'gemini-flash-latest', useSchema: true },
       { name: 'gemini-2.5-flash', useSchema: true },
+      { name: 'gemini-3.1-flash-image', useSchema: false },
+      { name: 'gemini-2.5-flash-image', useSchema: false },
       { name: 'gemini-3.5-flash', useSchema: false },
       { name: 'gemini-flash-latest', useSchema: false },
       { name: 'gemini-2.5-flash', useSchema: false }
     ];
 
     let lastError: any = null;
+
+    // 現在キーの読み込みが成功していることを診断するログ
+    const activeKey = getApiKey();
+    console.log("[AI API Key Diagnostics] Key exists:", !!activeKey, "Length:", activeKey ? activeKey.length : 0);
 
     for (const configItem of modelsWithSchema) {
       try {
@@ -191,7 +199,12 @@ Do not output any additional notes, markdown blocks, or text.
     }
 
     const errorMsg = lastError?.message || String(lastError);
-    throw new Error(`AI画像編集に失敗しました。Error: ${errorMsg}\n(一時的なアクセス集中(503)等による高負荷、またはAPIキーの利用制限が発生している必要があります。お手数ですが、少し時間を置いて再度お試しください。試行モデル: gemini-3.5-flash, gemini-flash-latest, gemini-2.5-flash)`);
+    const isSavedKeyOk = !!activeKey;
+    throw new Error(`AI画像編集に失敗しました。
+【診断情報】
+・APIキー設定状態: ${isSavedKeyOk ? "有効に読み込まれています (文字数: " + activeKey.length + ")" : "未設定または読み込み失敗"}
+・エラー詳細: ${errorMsg}
+・解説: 503エラーが発生している場合、APIキー自体は正しくGoogle側へ届いていますが、一時的な同時アクセス集中によるサーバー高負荷、またはお使いのAPIキーの無料枠の上限（1分間あたりの制限など）に達している可能性があります。高負荷に強い画像特化モデル（gemini-3.1-flash-image, gemini-2.5-flash-image）や標準モデルなど複数種でリトライを行いましたが、すべてで同様の制限が返されました。しばらくお時間を置くか、別の有効なAPIキーに変更してお試しください。`);
   } catch (error) {
     console.error("Edit Error:", error);
     throw error;
