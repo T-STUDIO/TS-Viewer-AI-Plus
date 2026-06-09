@@ -2,17 +2,30 @@ Multi-functional viewer that supports FITS file list display and PlateSolver (lo
 
 This contains everything you need to run your app locally.
 
-## Run Locally
+## Running in a Local Environment
 
-**Prerequisites:**  Node.js
-
+**Prerequisites:** Node.js
 
 1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
-   
+
+`npm install`
+
+2. Run the app:
+
+`npm run build` → `npm run preview`
+
+A dialog box to obtain a "geminiAPIKey" will appear upon first launch.
+You can use the app after registering your API key. (BYOK supported.)
+
+## Github Pages
+https://t-studio.github.io/TS-Viewer-AI-Plus/
+
+A dialog box to obtain a "geminiAPIKey" will appear upon first launch.
+You can use the app after registering your API key. (BYOK supported.)
+
+Since GitHub Pages does not have a local Astrometry.net instance, please use an API key for PlateSolving.
+
+## App description
 https://tstudioastronomy.blog.fc2.com/blog-category-46.html
 
-（Japanese Only)
+(Japanese only)
