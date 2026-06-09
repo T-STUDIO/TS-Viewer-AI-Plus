@@ -123,15 +123,82 @@ export async function fetchUrlWithProxy(
 export class AstrometryService {
   private apiKey: string;
   private session: string | null = null;
+  private isLocal: boolean;
+  private localIp: string;
+  private localPort: string;
+  private useCorsProxy: boolean;
+  private corsProxyUrl: string;
 
-  constructor(apiKey: string) {
+  constructor(
+    apiKey: string,
+    solverType: 'remote' | 'local' = 'remote',
+    localIp: string = '127.0.0.1',
+    localPort: string = '6004',
+    useCorsProxy: boolean = false,
+    corsProxyUrl: string = 'https://api.allorigins.win/raw?url='
+  ) {
     this.apiKey = apiKey.trim();
+    this.isLocal = solverType === 'local';
+    this.localIp = localIp.trim();
+    this.localPort = localPort.trim();
+    this.useCorsProxy = useCorsProxy;
+    this.corsProxyUrl = corsProxyUrl;
+  }
+
+  private getApiUrl(): string {
+    if (this.isLocal) {
+      return `http://${this.localIp}:${this.localPort}/api`;
+    }
+    return "https://nova.astrometry.net/api";
+  }
+
+  private getSiteUrl(): string {
+    if (this.isLocal) {
+      return `http://${this.localIp}:${this.localPort}`;
+    }
+    return "https://nova.astrometry.net";
+  }
+
+  private async request(urlOrPath: string, options: RequestInit = {}): Promise<Response> {
+    const baseUrl = urlOrPath.startsWith('http') ? '' : this.getApiUrl();
+    const targetUrl = urlOrPath.startsWith('http') ? urlOrPath : `${baseUrl}${urlOrPath}`;
+
+    const fetchOptions: RequestInit = {
+      ...options,
+      referrerPolicy: 'no-referrer',
+      credentials: 'omit',
+    };
+
+    if (this.useCorsProxy) {
+      const proxyUrl = (this.corsProxyUrl.includes('?') || this.corsProxyUrl.includes('='))
+        ? `${this.corsProxyUrl}${encodeURIComponent(targetUrl)}`
+        : targetUrl.replace("https://nova.astrometry.net", this.corsProxyUrl.replace(/\/$/, ""));
+
+      console.log(`[Solver Request] Using CORS Proxy: ${proxyUrl}`);
+      const res = await fetch(proxyUrl, fetchOptions);
+      if (!res.ok) {
+        throw new Error(`CORS Proxy (${this.corsProxyUrl}) がステータス ${res.status} を返しました。`);
+      }
+      return res;
+    }
+
+    if (this.isLocal) {
+      console.log(`[Solver Request] Local Proxy Direct: ${targetUrl}`);
+      const res = await fetch(targetUrl, fetchOptions);
+      if (!res.ok) {
+        throw new Error(`ローカルプログラキシとの接続に失敗しました (Status: ${res.status})。ポート 6004 等でプロキシが自動起動しているかご確認ください。`);
+      }
+      return res;
+    }
+
+    // デフォルト（リモートかつCORSプロキシ指示なし） -> 従来のマルチプロキシフォールバックを使用
+    return fetchUrlWithProxy(targetUrl, options);
   }
 
   private async fetchAndValidateFits(urlOrPath: string): Promise<Blob> {
       let lastError: Error | null = null;
       const maxRetries = 10;
-      const targetUrlBase = urlOrPath.startsWith('http') ? urlOrPath : `${API_URL}${urlOrPath}`;
+      const targetUrlBase = urlOrPath.startsWith('http') ? urlOrPath : `${this.getApiUrl()}${urlOrPath}`;
 
       for (let attempt = 0; attempt < maxRetries; attempt++) {
           if (attempt > 0) {
@@ -139,29 +206,17 @@ export class AstrometryService {
               await delay(waitTime);
           }
           const targetUrl = `${targetUrlBase}${targetUrlBase.includes('?') ? '&' : '?'}_t=${Date.now()}`;
-          let is404 = false;
 
-          for (const proxy of PROXIES) {
-              const controller = new AbortController();
-              const timeoutId = setTimeout(() => controller.abort(), 60000); 
-              try {
-                  const proxyUrl = proxy.gen(targetUrl);
-                  const res = await fetch(proxyUrl, { referrerPolicy: 'no-referrer', credentials: 'omit', cache: 'no-store', signal: controller.signal });
-                  clearTimeout(timeoutId);
-                  if (res.status === 404) { is404 = true; throw new Error("HTTP 404"); }
-                  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                  const blob = await res.blob();
-                  const signature = await blob.slice(0, 6).text();
-                  if (signature === 'SIMPLE') return blob;
-                  throw new Error("Invalid FITS signature");
-              } catch (e) {
-                  clearTimeout(timeoutId);
-                  lastError = e as Error;
-                  if (is404) break;
-                  await delay(500); 
-              }
+          try {
+              const res = await this.request(targetUrl);
+              const blob = await res.blob();
+              const signature = await blob.slice(0, 6).text();
+              if (signature === 'SIMPLE') return blob;
+              throw new Error("Invalid FITS signature");
+          } catch (e) {
+              lastError = e as Error;
+              await delay(500);
           }
-          if (is404) continue;
       }
       throw lastError || new Error("FITS fetch failed");
   }
@@ -169,7 +224,7 @@ export class AstrometryService {
   async login(): Promise<string> {
     const params = new URLSearchParams();
     params.append('request-json', JSON.stringify({ apikey: this.apiKey }));
-    const res = await fetchUrlWithProxy(`${API_URL}/login`, { method: 'POST', body: params });
+    const res = await this.request('/login', { method: 'POST', body: params });
     const data: SolverLogin = await res.json();
     if (data.status !== 'success') throw new Error(data.message || "Login failed.");
     this.session = data.session;
@@ -181,7 +236,7 @@ export class AstrometryService {
     const formData = new FormData();
     formData.append('request-json', JSON.stringify({ session: this.session, publicly_visible: 'n' }));
     formData.append('file', file, fileName);
-    const res = await fetchUrlWithProxy(`${API_URL}/upload`, { method: 'POST', body: formData });
+    const res = await this.request('/upload', { method: 'POST', body: formData });
     const data: SolverUpload = await res.json();
     if (data.status !== 'success') throw new Error(data.errormessage || "Upload Error");
     return data.subid;
@@ -190,7 +245,7 @@ export class AstrometryService {
   async waitForJob(subId: number, onStatus?: (status: string) => void): Promise<number> {
     let attempts = 0;
     while (attempts < 100) { 
-      const res = await fetchUrlWithProxy(`${API_URL}/submissions/${subId}?_t=${Date.now()}`);
+      const res = await this.request(`/submissions/${subId}?_t=${Date.now()}`);
       if (res.ok) {
           const data: SolverSubmission = await res.json();
           if (data.jobs && data.jobs.length > 0 && data.jobs[0] !== null) return this.pollJobCompletion(data.jobs[0], onStatus);
@@ -205,7 +260,7 @@ export class AstrometryService {
   private async pollJobCompletion(jobId: number, onStatus?: (status: string) => void): Promise<number> {
     let attempts = 0;
     while (attempts < 150) { 
-      const res = await fetchUrlWithProxy(`${API_URL}/jobs/${jobId}?_t=${Date.now()}`);
+      const res = await this.request(`/jobs/${jobId}?_t=${Date.now()}`);
       if (res.ok) {
           const data: SolverJobStatus = await res.json();
           if (data.status === 'success') return jobId;
@@ -220,7 +275,7 @@ export class AstrometryService {
 
   async getAnnotations(jobId: number): Promise<AnnotationObject[]> {
     try {
-      const res = await fetchUrlWithProxy(`${API_URL}/jobs/${jobId}/annotations/`);
+      const res = await this.request(`/jobs/${jobId}/annotations/`);
       const data: SolverAnnotations = await res.json();
       return data.annotations || [];
     } catch { return []; }
@@ -228,7 +283,7 @@ export class AstrometryService {
 
   async getWcsHeader(jobId: number): Promise<Record<string, string | number>> {
     try {
-      const blob = await this.fetchAndValidateFits(`${SITE_URL}/wcs_file/${jobId}`);
+      const blob = await this.fetchAndValidateFits(`${this.getSiteUrl()}/wcs_file/${jobId}`);
       const rawText = await blob.text();
       return parseFitsHeader(rawText);
     } catch { return {}; }

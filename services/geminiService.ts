@@ -1,6 +1,7 @@
 /**
- * Gemini API サービス（TS-Connect ローカルサーバ対応版）
+ * Gemini API サービス（TS-Connect ローカルサーバ対応版 / @google/genai 公式SDK最適化版）
  */
+import { GoogleGenAI } from '@google/genai';
 
 const getApiKey = () => {
   const savedKey = localStorage.getItem('gemini_api_key');
@@ -13,37 +14,32 @@ const getApiKey = () => {
   return env.API_KEY || env.GEMINI_API_KEY || "";
 };
 
-const initAI = async () => {
-  // ローカルサーバでの解決エラーを防ぐため、CDNから読み込みます
-  const moduleUrl = "https://esm.run/@google/generative-ai";
-  const mod = await import(moduleUrl);
-  const GoogleGenerativeAI = mod.GoogleGenerativeAI || mod.default?.GoogleGenerativeAI;
-
+const initAI = (): GoogleGenAI => {
   const apiKey = getApiKey();
   if (!apiKey) throw new Error("APIキーが設定されていません。");
 
-  return new GoogleGenerativeAI(apiKey);
+  return new GoogleGenAI({ apiKey });
 };
 
 // 1. 天体情報の要約機能
 const generateWithFallback = async (
-  genAI: any,
-  promptOrParts: any,
-  models: string[] = ['gemini-3.5-flash', 'gemini-flash-latest', 'gemini-2.5-flash'],
+  ai: GoogleGenAI,
+  contents: any,
+  models: string[] = ['gemini-3.5-flash'],
   config: any = null
 ) => {
   let lastError: any = null;
   for (const modelName of models) {
     try {
       console.log(`[AI] Attempting call with model: ${modelName}`);
-      let model;
+      const options: any = {
+        model: modelName,
+        contents,
+      };
       if (config) {
-        model = genAI.getGenerativeModel({ model: modelName, ...config });
-      } else {
-        model = genAI.getGenerativeModel({ model: modelName });
+        options.config = config;
       }
-      const result = await model.generateContent(promptOrParts);
-      const response = await result.response;
+      const response = await ai.models.generateContent(options);
       return { response, modelName };
     } catch (err: any) {
       console.warn(`[AI] Model ${modelName} failed or over capacity (503/429/etc):`, err);
@@ -55,7 +51,7 @@ const generateWithFallback = async (
 
 export const getObjectSummary = async (objectName, language = 'ja') => {
   try {
-    const genAI = await initAI();
+    const ai = initAI();
     const langInstruction = language === 'ja'
       ? 'IMPORTANT: You MUST output strictly in Japanese (日本語). Ensure the response is natural and easy to read for Japanese speakers.'
       : 'Response Language: English';
@@ -77,44 +73,44 @@ export const getObjectSummary = async (objectName, language = 'ja') => {
     `;
 
     const { response, modelName } = await generateWithFallback(
-      genAI,
+      ai,
       prompt,
-      ['gemini-3.5-flash', 'gemini-flash-latest', 'gemini-2.5-flash']
+      ['gemini-3.5-flash']
     );
     console.log(`[AI] Object summary successful using model: ${modelName}`);
-    return response.text();
+    return response.text;
   } catch (error: any) {
     console.error("Summary Error:", error);
     const errorMsg = error?.message || String(error);
-    return `要約の取得に失敗しました。Error: ${errorMsg}\n(一時的に高負荷状態(503)、または利用枠（クォータ）制限に達している可能性があります。数分置いて再度お試しいただくか、別のAPIキーをご利用ください。試行されたモデル: gemini-3.5-flash, gemini-flash-latest, gemini-2.5-flash)`;
+    return `要約の取得に失敗しました。Error: ${errorMsg}\n(一時的に高負荷状態(503)、または利用枠（クォータ）制限に達している可能性があります。数分置いて再度お試しいただくか、別のAPIキーをご利用ください。試行されたモデル: gemini-3.5-flash)`;
   }
 };
 
 // 2. 画像の解析機能
 export const analyzeImage = async (base64Data, mimeType, prompt = "この画像を説明してください") => {
   try {
-    const genAI = await initAI();
+    const ai = initAI();
     const { response, modelName } = await generateWithFallback(
-      genAI,
+      ai,
       [
         prompt,
         { inlineData: { data: base64Data, mimeType } }
       ],
-      ['gemini-3.5-flash', 'gemini-flash-latest', 'gemini-2.5-flash']
+      ['gemini-3.5-flash']
     );
     console.log(`[AI] Image analysis successful using model: ${modelName}`);
-    return response.text();
+    return response.text;
   } catch (error: any) {
     console.error("Analyze Error:", error);
     const errorMsg = error?.message || String(error);
-    return `解析エラー: ${errorMsg}\n(一時的なアクセス集中(503)等により、全てのモデルでエラーが返されました。しばらく時間を置いてから再度お試しください。試行モデル: gemini-3.5-flash, gemini-flash-latest, gemini-2.5-flash)`;
+    return `解析エラー: ${errorMsg}\n(一時的なアクセス集中(503)等により、全てのモデルでエラーが返されました。しばらく時間を置いてから再度お試しください。試行モデル: gemini-3.5-flash)`;
   }
 };
 
 // 3. 画像の編集・生成機能
 export const editImage = async (base64Data: string, mimeType: string, instruction: string) => {
   try {
-    const genAI = await initAI();
+    const ai = initAI();
     const prompt = `
 You are an expert astronomical image processing assistant.
 Analyze the provided astronomical image and apply the following processing instruction: "${instruction}".
@@ -123,17 +119,10 @@ Provide the output as JSON conforming to the schema. The "image" field must cont
 Do not output any additional notes, markdown blocks, or text.
 `;
 
+    // 試行するモデル構成
     const modelsWithSchema = [
-      { name: 'gemini-3.1-flash-image', useSchema: true },
-      { name: 'gemini-2.5-flash-image', useSchema: true },
       { name: 'gemini-3.5-flash', useSchema: true },
-      { name: 'gemini-flash-latest', useSchema: true },
-      { name: 'gemini-2.5-flash', useSchema: true },
-      { name: 'gemini-3.1-flash-image', useSchema: false },
-      { name: 'gemini-2.5-flash-image', useSchema: false },
-      { name: 'gemini-3.5-flash', useSchema: false },
-      { name: 'gemini-flash-latest', useSchema: false },
-      { name: 'gemini-2.5-flash', useSchema: false }
+      { name: 'gemini-3.5-flash', useSchema: false }
     ];
 
     let lastError: any = null;
@@ -146,35 +135,33 @@ Do not output any additional notes, markdown blocks, or text.
       try {
         console.log(`[AI] Attempting editImage with model: ${configItem.name} (useSchema: ${configItem.useSchema})`);
         
-        let model;
+        let config: any = {};
         if (configItem.useSchema) {
-          model = genAI.getGenerativeModel({
-            model: configItem.name,
-            generationConfig: {
-              responseMimeType: 'application/json',
-              responseSchema: {
-                type: 'OBJECT',
-                properties: {
-                  image: {
-                    type: 'STRING',
-                    description: 'The processed astronomical image in JPEG format encoded as a base64 string, completely clean without prefix.'
-                  }
-                },
-                required: ['image']
-              }
+          config = {
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: 'OBJECT',
+              properties: {
+                image: {
+                  type: 'STRING',
+                  description: 'The processed astronomical image in JPEG format encoded as a base64 string, completely clean without prefix.'
+                }
+              },
+              required: ['image']
             }
-          });
-        } else {
-          model = genAI.getGenerativeModel({ model: configItem.name });
+          };
         }
 
-        const result = await model.generateContent([
-          prompt,
-          { inlineData: { data: base64Data, mimeType } }
-        ]);
+        const response = await ai.models.generateContent({
+          model: configItem.name,
+          contents: [
+            prompt,
+            { inlineData: { data: base64Data, mimeType } }
+          ],
+          config
+        });
 
-        const response = await result.response;
-        const responseText = response.text().trim();
+        const responseText = response.text ? response.text.trim() : '';
 
         try {
           const parsed = JSON.parse(responseText);
@@ -204,7 +191,7 @@ Do not output any additional notes, markdown blocks, or text.
 【診断情報】
 ・APIキー設定状態: ${isSavedKeyOk ? "有効に読み込まれています (文字数: " + activeKey.length + ")" : "未設定または読み込み失敗"}
 ・エラー詳細: ${errorMsg}
-・解説: 503エラーが発生している場合、APIキー自体は正しくGoogle側へ届いていますが、一時的な同時アクセス集中によるサーバー高負荷、またはお使いのAPIキーの無料枠の上限（1分間あたりの制限など）に達している可能性があります。高負荷に強い画像特化モデル（gemini-3.1-flash-image, gemini-2.5-flash-image）や標準モデルなど複数種でリトライを行いましたが、すべてで同様の制限が返されました。しばらくお時間を置くか、別の有効なAPIキーに変更してお試しください。`);
+・解説: 503エラーが発生している場合、APIキー自体は正しくGoogle側へ届いていますが、一時的な同時アクセス集中によるサーバー高負荷、またはお使いのAPIキーの無料枠の上限（1分間あたりの制限など）に達している可能性があります。高負荷に強い最新のgemini-3.5-flash等のリトライを行いましたが、すべてで同様の制限が返されました。しばらくお時間を置くか、別の有効なAPIキーに変更してお試しください。`);
   } catch (error) {
     console.error("Edit Error:", error);
     throw error;
