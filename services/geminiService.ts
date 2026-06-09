@@ -1,12 +1,12 @@
 /**
- * Gemini API \u30b5\u30fc\u30d3\u30b9\uff08TS-Connect \u30ed\u30fc\u30ab\u30eb\u30b5\u30fc\u30d0\u5bfe\u5fdc\u7248\uff09
+ * Gemini API サービス（TS-Connect ローカルサーバ対応版）
  */
 
 const getApiKey = () => {
   const savedKey = localStorage.getItem('gemini_api_key');
   if (savedKey) return savedKey;
 
-  const metaEnv = (import.meta).env;
+  const metaEnv = (import.meta as any).env;
   if (metaEnv && metaEnv.VITE_GEMINI_API_KEY) return metaEnv.VITE_GEMINI_API_KEY;
 
   const env = (typeof process !== 'undefined' ? process.env : {});
@@ -14,38 +14,56 @@ const getApiKey = () => {
 };
 
 const initAI = async () => {
-  // \u30ed\u30fc\u30ab\u30eb\u30b5\u30fc\u30d0\u3067\u306e\u89e3\u6c7a\u30a8\u30e9\u30fc\u3092\u9632\u3050\u305f\u3081\u3001CDN\u304b\u3089\u8aad\u307f\u8fbc\u307f\u307e\u3059
+  // ローカルサーバでの解決エラーを防ぐため、CDNから読み込みます
   const moduleUrl = "https://esm.run/@google/generative-ai";
   const mod = await import(moduleUrl);
   const GoogleGenerativeAI = mod.GoogleGenerativeAI || mod.default?.GoogleGenerativeAI;
 
   const apiKey = getApiKey();
-  if (!apiKey) throw new Error("API\u30ad\u30fc\u304c\u8a2d\u5b9a\u3055\u308c\u3066\u3044\u307e\u305b\u3093\u3002");
+  if (!apiKey) throw new Error("APIキーが設定されていません。");
 
   return new GoogleGenerativeAI(apiKey);
 };
 
-// 1. \u5929\u4f53\u60c5\u5831\u306e\u8981\u7d04\u6a5f\u80fd
-export const getObjectSummary = async (objectName) => {
+// 1. 天体情報の要約機能
+export const getObjectSummary = async (objectName, language = 'ja') => {
   try {
     const genAI = await initAI();
-    const model = genAI.getGenerativeModel({ model: 'gemini-3.0-flash' });
-    const prompt = `\u5929\u4f53\u300c${objectName}\u300d\u306b\u3064\u3044\u3066\u3001\u5c02\u9580\u30c7\u30fc\u30bf\u30d9\u30fc\u30b9\u306b\u57fa\u3065\u3044\u305f\u60c5\u5831\u3092\u65e5\u672c\u8a9e\u3067200\u6587\u5b57\u7a0b\u5ea6\u3067\u8981\u7d04\u3057\u3066\u304f\u3060\u3055\u3044\u30021.\u7a2e\u985e\u30012.\u7279\u5fb4\u30013.\u8c46\u77e5\u8b58\u306e\u69cb\u6210\u3067\u304a\u9858\u3044\u3057\u307e\u3059\u3002`;
+    const model = genAI.getGenerativeModel({ model: 'gemini-3.5-flash' });
+    const langInstruction = language === 'ja'
+      ? 'IMPORTANT: You MUST output strictly in Japanese (日本語). Ensure the response is natural and easy to read for Japanese speakers.'
+      : 'Response Language: English';
+
+    const prompt = `
+      Role: You are an expert astronomer and observatory assistant.
+      Task: Provide a detailed description of the celestial object "${objectName}".
+      Source Material: Refer to data from Wikipedia (天体情報) and standard Astronomical Catalogs (Messier, NGC, IC).
+
+      ${langInstruction}
+      
+      Please structure the response as follows:
+      1. **Overview**: Basic description, constellation, distance from Earth.
+      2. **Physical Characteristics**: Type, size, mass, age, composition.
+      3. **Observation**: Visual magnitude, apparent size, best season to view.
+      4. **History**: Discovery information, origin of name.
+      
+      Ensure the tone is educational and accurate.
+    `;
 
     const result = await model.generateContent(prompt);
     const response = await result.response;
     return response.text();
   } catch (error) {
     console.error("Summary Error:", error);
-    return "\u8981\u7d04\u306e\u53d6\u5f97\u306b\u5931\u6557\u3057\u307e\u3057\u305f\u3002";
+    return "要約の取得に失敗しました。";
   }
 };
 
-// 2. \u753b\u50cf\u306e\u89e3\u6790\u6a5f\u80fd
-export const analyzeImage = async (base64Data, mimeType, prompt = "\u3053\u306e\u753b\u50cf\u3092\u8aac\u660e\u3057\u3066\u304f\u3060\u3055\u3044") => {
+// 2. 画像の解析機能
+export const analyzeImage = async (base64Data, mimeType, prompt = "この画像を説明してください") => {
   try {
     const genAI = await initAI();
-    const model = genAI.getGenerativeModel({ model: 'gemini-3.0-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-3.5-flash' });
 
     const result = await model.generateContent([
       prompt,
@@ -56,27 +74,64 @@ export const analyzeImage = async (base64Data, mimeType, prompt = "\u3053\u306e\
     return response.text();
   } catch (error) {
     console.error("Analyze Error:", error);
-    return `\u89e3\u6790\u30a8\u30e9\u30fc: ${error.message}`;
+    return `解析エラー: ${error instanceof Error ? error.message : "不明なエラー"}`;
   }
 };
 
-// 3. \u753b\u50cf\u306e\u7de8\u96c6\u30fb\u751f\u6210\u6a5f\u80fd
-export const editImage = async (base64Data, mimeType, instruction) => {
+// 3. 画像の編集・生成機能
+export const editImage = async (base64Data: string, mimeType: string, instruction: string) => {
   try {
     const genAI = await initAI();
-    // \u753b\u50cf\u7de8\u96c6\u30bf\u30b9\u30af\u306b\u9069\u3057\u305f\u30e2\u30c7\u30eb\u3092\u6307\u5b9a
-    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
+    // 画像編集タスクに最も適した最新の gemini-3.5-flash を指定
+    const model = genAI.getGenerativeModel({ 
+      model: 'gemini-3.5-flash',
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'OBJECT',
+          properties: {
+            image: {
+              type: 'STRING',
+              description: 'The processed astronomical image in JPEG format encoded as a base64 string, completely clean without prefix.'
+            }
+          },
+          required: ['image']
+        }
+      }
+    });
+
+    const prompt = `
+You are an expert astronomical image processing assistant.
+Analyze the provided astronomical image and apply the following processing instruction: "${instruction}".
+Simulate advanced astronomical noise reduction, histogram stretch, calibration, or gradient removal as requested.
+Provide the output as JSON conforming to the schema. The "image" field must contain the result image as a clean base64 string (JPEG format).
+Do not output any additional notes, markdown blocks, or text.
+`;
 
     const result = await model.generateContent([
-      instruction,
+      prompt,
       { inlineData: { data: base64Data, mimeType } }
     ]);
 
     const response = await result.response;
+    const responseText = response.text().trim();
     
-    // \u6ce8\u610f: \u6a19\u6e96SDK\u3067\u306f\u76f4\u63a5\u300c\u753b\u50cf\u30d5\u30a1\u30a4\u30eb\u300d\u3092\u8fd4\u3059\u6319\u52d5\u304cAI Studio\u3068\u7570\u306a\u308b\u5834\u5408\u304c\u3042\u308a\u307e\u3059
-    // \u3053\u3053\u3067\u306f\u307e\u305a\u30c6\u30ad\u30b9\u30c8\u56de\u7b54\u3092\u8fd4\u3057\u307e\u3059
-    return { image: null, text: response.text() };
+    try {
+      const parsed = JSON.parse(responseText);
+      if (parsed.image) {
+        const cleanImg = parsed.image.replace(/^data:image\/[a-zA-Z]+;base64,/, '').trim();
+        return { image: cleanImg, text: responseText };
+      }
+    } catch (e) {
+      // フォールバック: JSON以外で出力された場合、正規表現でBase64を切り出す
+      const match = responseText.match(/(?:data:image\/(?:jpeg|png|jpg);base64,)?([A-Za-z0-9+/=\s]{100,})/);
+      if (match) {
+        const cleanImg = match[1].replace(/\s/g, '');
+        return { image: cleanImg, text: responseText };
+      }
+    }
+    
+    throw new Error("画像のBase64データを抽出できませんでした。");
   } catch (error) {
     console.error("Edit Error:", error);
     throw error;
