@@ -8,6 +8,7 @@ import {
   SupportedExtension, SUPPORTED_EXTENSIONS, FileEntry, DirectoryEntry, MIME_TYPES
 } from './types';
 import { PreviewModal } from './components/PreviewModal';
+import { GeminiApiKeyModal } from './components/GeminiApiKeyModal';
 import { FileThumbnail } from './components/FileThumbnail';
 import { translations, Language } from './services/i18n';
 
@@ -315,6 +316,9 @@ const App: React.FC = () => {
       {/* ●プレビュー画面 (モーダル) */}
       {previewFile && <PreviewModal fileEntry={previewFile} isOpen={true} onClose={() => setPreviewFile(null)} onNavigate={() => {}} hasNext={false} hasPrev={false} lang={lang} />}
       
+      {/* ●BYOK APIキー 登録/変更モーダル */}
+      <GeminiApiKeyModal lang={lang} />
+
       <style>{`
         .no-scrollbar::-webkit-scrollbar { display: none; }
       `}</style>
