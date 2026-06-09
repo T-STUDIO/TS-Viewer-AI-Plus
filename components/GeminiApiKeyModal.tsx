@@ -38,11 +38,11 @@ export const GeminiApiKeyModal: React.FC<GeminiApiKeyModalProps> = ({ onClose, l
       return;
     }
     
-    // Check key format prefix
-    if (!trimmed.startsWith('AIzaSy')) {
+    // プレフィックスチェックに捕まりすぎて、有効な異なる構造のキーを弾く不具合を回避します
+    if (!trimmed.startsWith('AIzaSy') && trimmed.length < 20) {
       setErrorMsg(
         lang === 'ja'
-          ? '無効なAPIキーフォーマットです。AIzaSyから始まるキーを入力してください。'
+          ? '無効なAPIキーフォーマットの可能性があります。AIzaSyから始まる正しいキーを入力してください。'
           : 'Invalid API key format. Should start with AIzaSy.'
       );
       return;
@@ -57,12 +57,11 @@ export const GeminiApiKeyModal: React.FC<GeminiApiKeyModalProps> = ({ onClose, l
     url.searchParams.delete('set_api_key');
     window.history.replaceState({}, '', url.toString());
     
+    // API設定の完全リセットと最速適用のため、保存時は常にリロードをトリガーします。
     if (onClose) {
       onClose();
-    } else {
-      // Reload page to apply changes
-      window.location.reload();
     }
+    window.location.reload();
   };
 
   const handleGetApiKey = () => {

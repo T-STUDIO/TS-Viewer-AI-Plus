@@ -81,7 +81,7 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({ fileEntry, isOpen, o
   const [solverType, setSolverType] = useState<'remote'|'local'>(() => (localStorage.getItem('solver_type') as any) || 'remote');
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('astrometry_api_key') || '');
   const [localIp, setLocalIp] = useState(() => localStorage.getItem('solver_local_ip') || '127.0.0.1');
-  const [localPort, setLocalPort] = useState(() => localStorage.getItem('solver_local_port') || '8080');
+  const [localPort, setLocalPort] = useState(() => localStorage.getItem('solver_local_port') || '6004');
   const [localRadius, setLocalRadius] = useState(() => localStorage.getItem('solver_local_radius') || '15');
   const [localSnr, setLocalSnr] = useState(() => localStorage.getItem('solver_local_snr') || '5');
   const [localDownsample, setLocalDownsample] = useState(() => localStorage.getItem('solver_local_downsample') || '2');
@@ -251,8 +251,47 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({ fileEntry, isOpen, o
       if (!canvasRef.current) return;
       setSolving(true); setSolveMsg(t.solving);
       try {
-          const solver = new AstrometryService(apiKey);
+          const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+          const isGitHub = !isLocalhost;
+          let useCorsProxy = false;
+          let corsProxyUrl = 'https://api.allorigins.win/raw?url=';
+
+          if (isGitHub && solverType === 'remote') {
+              const confirmProxy = window.confirm(
+                  "GitHub Pages環境において、直接のAstrometry API接続はCORS制限される場合があります。\n\nCORS問題を回避するために「https://api.allorigins.win/raw?url=」を設定または使用しますか？\n(OKを押すと適用、キャンセルするとエラーで終了します。)"
+              );
+              if (!confirmProxy) {
+                  throw new Error("CORSプロキシへの接続許可が拒否されたため、処理を中断しました。");
+              }
+              const userProxyUrl = window.prompt(
+                  "使用するCORSプロキシURLを指定してください (デフォルト: https://api.allorigins.win/raw?url=)",
+                  corsProxyUrl
+              );
+              if (userProxyUrl === null) {
+                  throw new Error("CORSプロキシURLがキャンセルされたため、処理を中断しました。");
+              }
+              if (!userProxyUrl.trim()) {
+                  throw new Error("CORSプロキシURLが入力されなかったため、処理を終了します。");
+              }
+              useCorsProxy = true;
+              corsProxyUrl = userProxyUrl.trim();
+          } else if (isLocalhost && solverType === 'remote') {
+              // ローカル開発環境でのリモート解決時は、自動起動された6004プロキシを介してCORS問題を回避します
+              useCorsProxy = true;
+              corsProxyUrl = 'http://127.0.0.1:6004';
+          }
+
+          const solver = new AstrometryService(
+              apiKey,
+              solverType,
+              localIp,
+              localPort,
+              useCorsProxy,
+              corsProxyUrl
+          );
+
           const blob = await new Promise<Blob>(r => canvasRef.current!.toBlob(r!, 'image/jpeg', 0.9));
+
           const { wcs, annotations: resAnns } = solverType === 'local' 
             ? await solver.solveLocal(blob, localIp, localPort, {
                 radius: parseFloat(localRadius), 
