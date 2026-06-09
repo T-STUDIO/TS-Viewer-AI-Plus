@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { X, Loader2, SlidersHorizontal, List, Sparkles, ScanSearch, Eraser, MousePointer2, ChevronDown, Save, RotateCcw, Palette, MapPin, Check, Mic, MicOff, BookmarkPlus, Undo2, Map as MapIcon, ExternalLink, Eye, EyeOff, Info, Globe, Search as SearchIcon, Maximize, ZoomIn, ZoomOut } from 'lucide-react';
 import { FileEntry } from '../types';
-import { editImage } from '../services/geminiService';
+import { editImage, getObjectSummary } from '../services/geminiService';
 import { parseFits, renderFitsToCanvas, writeFits, generateFitsHeaderString } from '../services/fitsUtils';
 import { renderTiffToCanvas, writeTiff } from '../services/tiffUtils';
 import { translations, Language } from '../services/i18n';
@@ -55,6 +55,8 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({ fileEntry, isOpen, o
   const [selectedAnnotation, setSelectedAnnotation] = useState<AnnotationObject | null>(null);
   const [wikiInfo, setWikiInfo] = useState<WikiInfo | null>(null);
   const [wikiLoading, setWikiLoading] = useState(false);
+  const [aiSummary, setAiSummary] = useState<string>('');
+  const [aiSummaryLoading, setAiSummaryLoading] = useState(false);
 
   const [selectionMode, setSelectionMode] = useState(false);
   const [allSelections, setAllSelections] = useState<{x:number,y:number}[][]>([]);
@@ -286,10 +288,29 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({ fileEntry, isOpen, o
     setSelectedAnnotation(ann);
     setActivePanel('object-detail');
     setWikiInfo(null); setWikiLoading(true);
-    try {
-        const info = await fetchWikiInfo(ann.names[0], lang);
+    setAiSummary(''); setAiSummaryLoading(true);
+    
+    // Wikipediaの取得
+    fetchWikiInfo(ann.names[0], lang)
+      .then(info => {
         setWikiInfo(info);
-    } catch (e) { console.error(e); } finally { setWikiLoading(false); }
+        setWikiLoading(false);
+      })
+      .catch(e => {
+        console.error("Wiki retrieval error:", e);
+        setWikiLoading(false);
+      });
+
+    // Gemini AIによる天体要約・解説の取得
+    getObjectSummary(ann.names[0], lang)
+      .then(summary => {
+        setAiSummary(summary);
+        setAiSummaryLoading(false);
+      })
+      .catch(e => {
+        console.error("AI summary error:", e);
+        setAiSummaryLoading(false);
+      });
   };
 
   const handleObjectSearch = async () => {
@@ -561,8 +582,10 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({ fileEntry, isOpen, o
                                       <h4 className="text-xl font-black text-white">{selectedAnnotation.names[0]}</h4>
                                       <span className="px-2 py-1 bg-blue-600/20 text-blue-400 text-[8px] font-black uppercase rounded-lg border border-blue-500/20">{selectedAnnotation.type}</span>
                                   </div>
+                                  
+                                  {/* Wikipedia情報表示 */}
                                   {wikiLoading ? (
-                                      <div className="flex flex-col items-center justify-center py-10 gap-3 opacity-40">
+                                      <div className="flex flex-col items-center justify-center py-6 gap-3 opacity-40">
                                           <Loader2 className="animate-spin" size={24} />
                                           <span className="text-[10px] font-black uppercase tracking-widest">Fetching from Wiki...</span>
                                       </div>
@@ -580,9 +603,31 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({ fileEntry, isOpen, o
                                               <a href={getAladinLink({ objectName: selectedAnnotation.names[0], ra: selectedAnnotation.ra, dec: selectedAnnotation.dec })} target="_blank" className="flex items-center justify-center gap-2 p-3 bg-indigo-600/20 text-indigo-400 border border-indigo-500/20 rounded-xl text-[9px] font-black uppercase transition-all"><MapIcon size={14}/> {t.openAladin}</a>
                                           </div>
                                       </div>
-                                  ) : (
-                                      <div className="text-center py-10 opacity-30 text-[10px] uppercase font-black">No info found for this object</div>
-                                  )}
+                                  ) : !aiSummaryLoading && !aiSummary ? (
+                                      <div className="text-center py-6 opacity-30 text-[10px] uppercase font-black">No Wiki info found for this object</div>
+                                  ) : null}
+
+                                  {/* Gemini AI 天体解説セクション */}
+                                  <div className="border-t border-white/5 pt-4 space-y-3">
+                                      <h5 className="text-[9px] font-black text-purple-400 uppercase tracking-widest flex items-center gap-1.5">
+                                          <Sparkles size={12} className="animate-pulse" />
+                                          {lang === 'ja' ? 'AI 天体解説' : 'AI Astronomical Commentary'}
+                                      </h5>
+                                      {aiSummaryLoading ? (
+                                          <div className="flex flex-col items-center justify-center py-6 gap-2 opacity-40">
+                                              <Loader2 className="animate-spin text-purple-400" size={18} />
+                                              <span className="text-[9px] font-black uppercase tracking-widest text-purple-400">Generating AI Commentary...</span>
+                                          </div>
+                                      ) : aiSummary ? (
+                                          <div className="text-[11px] text-gray-300 leading-relaxed font-normal whitespace-pre-wrap bg-purple-950/10 border border-purple-500/10 p-4 rounded-2xl max-h-60 overflow-y-auto no-scrollbar">
+                                              {aiSummary}
+                                          </div>
+                                      ) : (
+                                          <div className="text-[10px] text-gray-500 italic px-2">
+                                              {lang === 'ja' ? 'AI解説をロードできませんでした。' : 'Failed to load AI commentary.'}
+                                          </div>
+                                      )}
+                                  </div>
                               </div>
                               <button onClick={() => setActivePanel('solver')} className="w-full py-3 bg-white/5 hover:bg-white/10 rounded-xl text-[9px] font-black uppercase border border-white/5">Back to Objects List</button>
                           </div>
