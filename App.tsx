@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  FolderOpen, Folder, LayoutGrid, Search, Languages, Download, FileUp, Home, ChevronRight, UploadCloud, AlertTriangle, Settings, FolderSync
+  FolderOpen, Folder, LayoutGrid, Search, Languages, Download, FileUp, Home, ChevronRight, UploadCloud, AlertTriangle, Settings, FolderSync, Check, Layers, HelpCircle
 } from 'lucide-react';
 import { 
   FileSystemDirectoryHandle, FileSystemFileHandle, FileSystemHandle,
@@ -10,7 +10,9 @@ import {
 import { PreviewModal } from './components/PreviewModal';
 import { GeminiApiKeyModal } from './components/GeminiApiKeyModal';
 import { FileThumbnail } from './components/FileThumbnail';
+import { HelpModal } from './components/HelpModal';
 import { translations, Language } from './services/i18n';
+import { stackImageEntries } from './services/stackingService';
 
 // --- Virtual File System for Fallback ---
 class VirtualFileHandle implements FileSystemFileHandle {
@@ -49,6 +51,13 @@ const App: React.FC = () => {
   const [previewFile, setPreviewFile] = useState<FileEntry | null>(null);
   const [isNativeSupported, setIsNativeSupported] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Stacking states
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isStacking, setIsStacking] = useState(false);
+  const [stackingProgress, setStackingProgress] = useState(0);
+  const [stackingMsg, setStackingMsg] = useState('');
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
   const configInputRef = useRef<HTMLInputElement>(null);
 
   const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -205,6 +214,70 @@ const App: React.FC = () => {
     reader.readAsText(file);
   };
 
+  const toggleSelection = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleStacking = async () => {
+    const selectedFiles = entries.filter(e => e.handle.kind === 'file' && selectedIds.has(e.id)) as FileEntry[];
+    if (selectedFiles.length < 2) {
+      alert(lang === 'ja' ? "スタッキングを行うには、一覧から2枚以上の画像を選択（丸チェックをクリック）してください。" : "Please select 2 or more images to stack (by clicking circular checkboxes).");
+      return;
+    }
+
+    setIsStacking(true);
+    setStackingProgress(5);
+    setStackingMsg(lang === 'ja' ? 'スタッキング処理を開始します...' : 'Starting stacking process...');
+
+    try {
+      const result = await stackImageEntries(selectedFiles, (progress, message) => {
+        setStackingProgress(progress);
+        setStackingMsg(message);
+      });
+
+      // Virtual file naming (Japanese or English based on app lang) using actual aligned image count
+      const numStacked = result.successfulCount;
+      const totalSelected = result.totalCount;
+      const virtualFilename = lang === 'ja' ? `${numStacked}枚のスタッキング画像.jpg` : `${numStacked}_stacked_images.jpg`;
+      const virtualFile = new File([result.blob], virtualFilename, { type: "image/jpeg" });
+      const virtualHandle = new VirtualFileHandle(virtualFile, virtualFilename);
+      
+      const virtualEntry: FileEntry = {
+        id: `stacked-${Date.now()}`,
+        name: virtualFilename,
+        handle: virtualHandle,
+        extension: 'jpg',
+        type: 'image'
+      };
+
+      setPreviewFile(virtualEntry);
+      setSelectedIds(new Set());
+
+      // If any mismatch/error image was automatically excluded, inform the user
+      if (numStacked < totalSelected) {
+        const skipped = totalSelected - numStacked;
+        alert(
+          lang === 'ja'
+            ? `スタッキングが完了しました！\n\n・位置合わせ成功: ${numStacked} 枚\n・自動除外（位置補正不可）: ${skipped} 枚\n\n写り込みや天体が著しく異なるエラー画像 ${skipped} 枚は、綺麗に合成するために自動的に除去されました。`
+            : `Stacking completed!\n\n• Aligned: ${numStacked} frames\n• Excluded: ${skipped} frames\n\n${skipped} mismatch/noise frames were automatically filtered out to ensure a high-quality crisp stack.`
+        );
+      }
+    } catch (err: any) {
+      alert((lang === 'ja' ? 'スタッキングに失敗しました: ' : 'Stacking failed: ') + err.message);
+    } finally {
+      setIsStacking(false);
+    }
+  };
+
   const filteredEntries = entries.filter(e => e.name.toLowerCase().includes(search.toLowerCase()));
 
   return (
@@ -234,6 +307,7 @@ const App: React.FC = () => {
               <button onClick={handleExportConfig} className="p-2 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white transition-colors" title={t.exportSettings}><Download size={18}/></button>
               <button onClick={() => configInputRef.current?.click()} className="p-2 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white transition-colors" title={t.importSettings}><FileUp size={18}/></button>
            </div>
+           <button onClick={() => setIsHelpOpen(true)} className="p-2.5 hover:bg-white/10 rounded-xl text-gray-400 hover:text-white border border-white/5 transition-all" title={lang === 'ja' ? 'ヘルプを表示' : 'Show Help'}><HelpCircle size={20} /></button>
            <button onClick={() => setLang(l => l === 'en' ? 'ja' : 'en')} className="p-2.5 hover:bg-white/10 rounded-xl text-gray-400 hover:text-white border border-white/5 transition-all"><Languages size={20} /></button>
            {dirHandle && (
               <button onClick={handleOpenDirectory} className="p-2.5 hover:bg-white/10 rounded-xl text-blue-400 hover:text-blue-300 border border-blue-500/20 transition-all"><FolderSync size={20} /></button>
@@ -267,14 +341,39 @@ const App: React.FC = () => {
         /* ●サムネイル表示画面 */
         <div className="flex-1 flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
            {/* パス表示 */}
-           <div className="h-10 flex items-center px-6 gap-2 text-[10px] font-black uppercase tracking-widest text-gray-500 bg-black/20 border-b border-white/5 shrink-0">
-               <button onClick={() => { setPath(path.slice(0, 1)); scanDirectory(path[0].handle); }} className="hover:text-blue-400 transition-colors flex items-center gap-1.5"><Home size={12} /> HOME</button>
-               {path.map((p, i) => (
-                  <React.Fragment key={i}>
-                    <ChevronRight size={12} className="text-gray-700" />
-                    <button onClick={() => { const n = path.slice(0, i+1); setPath(n); scanDirectory(n[i].handle); }} className={`hover:text-white transition-colors ${i === path.length-1 ? 'text-blue-400' : ''}`}>{p.name}</button>
-                  </React.Fragment>
-               ))}
+           <div className="h-10 flex items-center justify-between px-6 text-[10px] font-black uppercase tracking-widest text-gray-500 bg-black/20 border-b border-white/5 shrink-0">
+               <div className="flex items-center gap-2">
+                   <button onClick={() => { setPath(path.slice(0, 1)); scanDirectory(path[0].handle); }} className="hover:text-blue-400 transition-colors flex items-center gap-1.5"><Home size={12} /> HOME</button>
+                   {path.map((p, i) => (
+                      <React.Fragment key={i}>
+                        <ChevronRight size={12} className="text-gray-700" />
+                        <button onClick={() => { const n = path.slice(0, i+1); setPath(n); scanDirectory(n[i].handle); }} className={`hover:text-white transition-colors ${i === path.length-1 ? 'text-blue-400' : ''}`}>{p.name}</button>
+                      </React.Fragment>
+                   ))}
+               </div>
+
+               {selectedIds.size > 0 && (
+                  <div className="flex items-center gap-3 animate-in fade-in slide-in-from-right-3">
+                     <span className="text-gray-400 font-bold normal-case text-xs">
+                        {lang === 'ja' ? `${selectedIds.size}枚選択中` : `${selectedIds.size} selected`}
+                     </span>
+                     <button 
+                        onClick={() => setSelectedIds(new Set())}
+                        className="text-[9px] hover:text-white border border-white/10 px-2 py-0.5 rounded transition-colors"
+                     >
+                        {lang === 'ja' ? '解除' : 'Clear'}
+                     </button>
+                     {selectedIds.size >= 2 && (
+                        <button 
+                           onClick={handleStacking} 
+                           className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white font-black px-3 py-1 rounded-lg text-[9px] shadow-lg shadow-blue-900/35 transition-all active:scale-95 uppercase tracking-wider"
+                        >
+                           <Layers size={11} />
+                           <span>{lang === 'ja' ? 'スタッキングを実行' : 'Execute Stacking'}</span>
+                        </button>
+                     )}
+                  </div>
+               )}
            </div>
 
            {/* ファイルグリッド */}
@@ -288,20 +387,71 @@ const App: React.FC = () => {
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10 gap-5">
                       {filteredEntries.map(entry => {
                           const isDir = entry.handle.kind === 'directory';
+                          const isSelected = selectedIds.has(entry.id);
+                          const isImage = !isDir && (entry as FileEntry).type === 'image';
+
+                          const handleClick = (e: React.MouseEvent) => {
+                              if (isDir) {
+                                  setPath([...path, {name: entry.name, handle: entry.handle as FileSystemDirectoryHandle}]);
+                                  scanDirectory(entry.handle as FileSystemDirectoryHandle);
+                              } else {
+                                  if (selectedIds.size > 0 || e.ctrlKey || e.metaKey || e.shiftKey) {
+                                      toggleSelection(entry.id, e);
+                                  } else {
+                                      setPreviewFile(entry as FileEntry);
+                                  }
+                              }
+                          };
+
+                          const handleDoubleClick = (e: React.MouseEvent) => {
+                              if (isDir) return;
+                              if (selectedIds.size >= 2) {
+                                  handleStacking();
+                              } else {
+                                  setPreviewFile(entry as FileEntry);
+                              }
+                          };
+
                           return (
                               <div 
                                 key={entry.id} 
-                                className="group flex flex-col gap-3 cursor-pointer animate-in fade-in slide-in-from-bottom-2" 
-                                onClick={() => isDir ? (setPath([...path, {name: entry.name, handle: entry.handle as FileSystemDirectoryHandle}]), scanDirectory(entry.handle as FileSystemDirectoryHandle)) : setPreviewFile(entry as FileEntry)}
+                                className="group flex flex-col gap-3 cursor-pointer animate-in fade-in slide-in-from-bottom-2 relative" 
+                                onClick={handleClick}
+                                onDoubleClick={handleDoubleClick}
                               >
-                                 <div className="aspect-square bg-gray-900 border border-white/5 rounded-2xl overflow-hidden shadow-lg group-hover:border-blue-500/50 group-hover:shadow-blue-900/20 transition-all duration-300 flex items-center justify-center relative">
-                                    {isDir ? <div className="p-4 bg-blue-500/10 rounded-2xl text-blue-500"><Folder size={48} /></div> : <FileThumbnail entry={entry as FileEntry} />}
+                                 <div className={`aspect-square bg-gray-900 border rounded-2xl overflow-hidden shadow-lg transition-all duration-300 flex items-center justify-center relative ${
+                                    isSelected 
+                                      ? 'border-blue-500 shadow-xl shadow-blue-900/30 ring-2 ring-blue-500/40 scale-95' 
+                                      : 'border-white/5 group-hover:border-blue-500/50 group-hover:shadow-blue-900/20'
+                                 }`}>
+                                    {isDir ? (
+                                        <div className="p-4 bg-blue-500/10 rounded-2xl text-blue-500"><Folder size={48} /></div>
+                                    ) : (
+                                        <FileThumbnail entry={entry as FileEntry} />
+                                    )}
+
+                                    {/* 複数選択チェックボックス */}
+                                    {isImage && (
+                                        <button
+                                            onClick={(e) => toggleSelection(entry.id, e)}
+                                            className={`absolute top-2.5 left-2.5 z-10 w-6 h-6 rounded-full border flex items-center justify-center transition-all duration-300 ${
+                                                isSelected 
+                                                  ? 'bg-blue-600 border-blue-500 text-white scale-100 opacity-100 shadow-lg' 
+                                                  : 'bg-black/60 border-white/20 text-transparent opacity-0 group-hover:opacity-100 hover:scale-110 hover:border-white'
+                                            }`}
+                                        >
+                                            <Check size={11} className={isSelected ? 'text-white font-extrabold stroke-[3px]' : ''} />
+                                        </button>
+                                    )}
+
                                     <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-3">
                                        <span className="text-[8px] font-black text-white uppercase tracking-tighter truncate w-full">{entry.name}</span>
                                     </div>
                                  </div>
                                  <div className="px-1 text-center">
-                                    <p className="text-[10px] font-bold text-gray-400 group-hover:text-white transition-colors truncate">{entry.name}</p>
+                                    <p className={`text-[10px] font-bold truncate transition-colors ${
+                                        isSelected ? 'text-blue-400 font-extrabold' : 'text-gray-400 group-hover:text-white'
+                                    }`}>{entry.name}</p>
                                     {!isDir && <p className="text-[8px] font-black text-gray-700 uppercase tracking-widest mt-0.5">{(entry as FileEntry).extension}</p>}
                                  </div>
                               </div>
@@ -313,11 +463,51 @@ const App: React.FC = () => {
         </div>
       )}
 
+      {/* ●スタッキング処理中のオーバーレイ表示 */}
+      {isStacking && (
+         <div className="fixed inset-0 bg-gray-950/90 backdrop-blur-md z-50 flex flex-col items-center justify-center p-6 animate-in fade-in duration-300">
+             <div className="max-w-md w-full bg-gray-900 border border-white/10 rounded-3xl p-8 shadow-2xl text-center flex flex-col items-center gap-6 relative overflow-hidden">
+                 {/* 背景のグラデーション発光 */}
+                 <div className="absolute -top-24 -left-24 w-48 h-48 bg-blue-500/20 rounded-full blur-[80px]" />
+                 <div className="absolute -bottom-24 -right-24 w-48 h-48 bg-indigo-500/20 rounded-full blur-[80px]" />
+                 
+                 <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center animate-bounce shadow-lg shadow-blue-900/50">
+                     <Layers size={32} className="text-white" />
+                 </div>
+                 
+                 <div>
+                     <h3 className="text-lg font-black text-white uppercase tracking-wider">
+                         {lang === 'ja' ? '天体画像スタッキング合成中' : 'Stacking Astronomical Images'}
+                     </h3>
+                     <p className="text-xs text-gray-500 font-semibold mt-1">
+                         {lang === 'ja' ? 'アライメント ＋ ノイズ低減 ＋ レベル最適化' : 'Alignment + Noise Reduction + Levels Tuning'}
+                     </p>
+                 </div>
+
+                 {/* プログレスバー */}
+                 <div className="w-full bg-white/5 h-3 rounded-full overflow-hidden border border-white/5">
+                     <div 
+                         className="bg-gradient-to-r from-blue-500 to-indigo-500 h-full rounded-full transition-all duration-300"
+                         style={{ width: `${stackingProgress}%` }}
+                     />
+                 </div>
+
+                 <div className="flex justify-between items-center w-full text-[10px] font-bold text-gray-400 tracking-wider">
+                     <span className="uppercase text-blue-400">{stackingMsg}</span>
+                     <span>{stackingProgress}%</span>
+                 </div>
+             </div>
+         </div>
+      )}
+
       {/* ●プレビュー画面 (モーダル) */}
       {previewFile && <PreviewModal fileEntry={previewFile} isOpen={true} onClose={() => setPreviewFile(null)} onNavigate={() => {}} hasNext={false} hasPrev={false} lang={lang} />}
       
       {/* ●BYOK APIキー 登録/変更モーダル */}
       <GeminiApiKeyModal lang={lang} />
+
+      {/* ●ヘルプモーダル */}
+      <HelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} lang={lang} />
 
       <style>{`
         .no-scrollbar::-webkit-scrollbar { display: none; }
