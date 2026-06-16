@@ -8,10 +8,12 @@ import https from 'https';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const astrometryProxyPlugin = () => ({
-  name: 'astrometry-proxy-6004',
-  configureServer(server) {
-    const proxyServer = http.createServer((req, res) => {
+const astrometryProxyPlugin = () => {
+  let proxyServer: http.Server | null = null;
+
+  const startProxy = () => {
+    if (proxyServer) return;
+    proxyServer = http.createServer((req, res) => {
       // CORS headers
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE');
@@ -50,12 +52,30 @@ const astrometryProxyPlugin = () => ({
     proxyServer.listen(6004, '0.0.0.0', () => {
       console.log('Astrometry CORS Proxy server automatically running on http://0.0.0.0:6004');
     });
+  };
 
-    server.httpServer?.on('close', () => {
-      proxyServer.close();
-    });
-  }
-});
+  return {
+    name: 'astrometry-proxy-6004',
+    configureServer(server) {
+      startProxy();
+      server.httpServer?.on('close', () => {
+        if (proxyServer) {
+          proxyServer.close();
+          proxyServer = null;
+        }
+      });
+    },
+    configurePreviewServer(server) {
+      startProxy();
+      server.httpServer?.on('close', () => {
+        if (proxyServer) {
+          proxyServer.close();
+          proxyServer = null;
+        }
+      });
+    }
+  };
+};
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
