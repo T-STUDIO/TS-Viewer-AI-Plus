@@ -58,8 +58,8 @@ const astrometryProxyPlugin = () => {
         proxyServer = null;
       });
 
-      proxyServer.listen(6004, '0.0.0.0', () => {
-        console.log('Astrometry CORS Proxy server automatically running on http://0.0.0.0:6004');
+      proxyServer.listen(6004, () => {
+        console.log('Astrometry CORS Proxy server automatically running on port 6004 (Dual-stack IPv4/IPv6)');
       });
     } catch (e) {
       console.error('[Astrometry CORS Proxy Setup Failed]:', e);
