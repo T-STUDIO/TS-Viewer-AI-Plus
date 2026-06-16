@@ -8,10 +8,14 @@ import https from 'https';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const astrometryProxyPlugin = () => {
+const astrometryProxyPlugin = (shouldStart: boolean) => {
   let proxyServer: any = null;
 
   const startProxy = () => {
+    if (!shouldStart) {
+      console.log('[Astrometry CORS Proxy] Skip starting proxy: Only allowed on dev/preview server.');
+      return;
+    }
     if (proxyServer) return;
     try {
       proxyServer = http.createServer((req: any, res: any) => {
@@ -26,59 +30,79 @@ const astrometryProxyPlugin = () => {
           return;
         }
 
-        // Proxy request to nova.astrometry.net
-        const targetUrl = new URL(req.url || '', 'https://nova.astrometry.net');
+        // Buffer the request body fully to handle POST/PUT data safely
+        const bodyChunks: any[] = [];
+        req.on('data', (chunk: any) => {
+          bodyChunks.push(chunk);
+        });
 
-        // Remove origin/referer headers to avoid triggering CORS redirect blocks or security checks on astrometry.net
-        const filteredHeaders = { ...req.headers };
-        delete filteredHeaders.host;
-        delete filteredHeaders.origin;
-        delete filteredHeaders.referer;
+        req.on('end', () => {
+          const bodyBuffer = Buffer.concat(bodyChunks);
 
-        const proxyReq = https.request({
-          hostname: 'nova.astrometry.net',
-          path: targetUrl.pathname + targetUrl.search,
-          method: req.method,
-          headers: {
-            ...filteredHeaders,
-            host: 'nova.astrometry.net',
+          // Proxy request to nova.astrometry.net
+          const targetUrl = new URL(req.url || '', 'https://nova.astrometry.net');
+
+          // Remove origin/referer headers to avoid triggering CORS redirect blocks or security checks on astrometry.net
+          const filteredHeaders = { ...req.headers };
+          delete filteredHeaders.host;
+          delete filteredHeaders.origin;
+          delete filteredHeaders.referer;
+
+          // Adjust content-length dynamically
+          if (bodyBuffer.length > 0) {
+            filteredHeaders['content-length'] = String(bodyBuffer.length);
+          } else {
+            delete filteredHeaders['content-length'];
           }
-        }, (proxyRes: any) => {
-          const resHeaders = { ...proxyRes.headers };
 
-          // Keep CORS simple and open
-          resHeaders['access-control-allow-origin'] = '*';
-          resHeaders['access-control-allow-methods'] = 'GET, POST, OPTIONS, PUT, PATCH, DELETE';
-          resHeaders['access-control-allow-headers'] = 'X-Requested-With,content-type,Authorization,request-json';
-
-          // Handle 3xx redirect Location header rewrite, to prevent browser from accessing nova.astrometry.net directly (which throws CORS error)
-          if (resHeaders.location) {
-            console.log(`[Astrometry CORS Proxy] Intercepted redirect location: ${resHeaders.location}`);
-            try {
-              const locUrl = new URL(resHeaders.location, 'https://nova.astrometry.net');
-              if (locUrl.hostname === 'nova.astrometry.net') {
-                const clientHost = req.headers.host || 'localhost:6004';
-                const isSecured = req.isSpdy || req.connection?.encrypted;
-                const proto = isSecured ? 'https' : 'http';
-                resHeaders.location = `${proto}://${clientHost}${locUrl.pathname}${locUrl.search}`;
-                console.log(`[Astrometry CORS Proxy] Rewrote redirect location to: ${resHeaders.location}`);
-              }
-            } catch (e) {
-              console.error('[Astrometry CORS Proxy] Failed to parse and rewrite location header:', e);
+          const proxyReq = https.request({
+            hostname: 'nova.astrometry.net',
+            path: targetUrl.pathname + targetUrl.search,
+            method: req.method,
+            headers: {
+              ...filteredHeaders,
+              host: 'nova.astrometry.net',
             }
+          }, (proxyRes: any) => {
+            const resHeaders = { ...proxyRes.headers };
+
+            // Keep CORS simple and open
+            resHeaders['access-control-allow-origin'] = '*';
+            resHeaders['access-control-allow-methods'] = 'GET, POST, OPTIONS, PUT, PATCH, DELETE';
+            resHeaders['access-control-allow-headers'] = 'X-Requested-With,content-type,Authorization,request-json';
+
+            // Handle 3xx redirect Location header rewrite, to prevent browser from accessing nova.astrometry.net directly (which throws CORS error)
+            if (resHeaders.location) {
+              console.log(`[Astrometry CORS Proxy] Intercepted redirect location: ${resHeaders.location}`);
+              try {
+                const locUrl = new URL(resHeaders.location, 'https://nova.astrometry.net');
+                if (locUrl.hostname === 'nova.astrometry.net') {
+                  const clientHost = req.headers.host || 'localhost:6004';
+                  const isSecured = req.isSpdy || req.connection?.encrypted;
+                  const proto = isSecured ? 'https' : 'http';
+                  resHeaders.location = `${proto}://${clientHost}${locUrl.pathname}${locUrl.search}`;
+                  console.log(`[Astrometry CORS Proxy] Rewrote redirect location to: ${resHeaders.location}`);
+                }
+              } catch (e) {
+                console.error('[Astrometry CORS Proxy] Failed to parse and rewrite location header:', e);
+              }
+            }
+
+            res.writeHead(proxyRes.statusCode || 200, resHeaders);
+            proxyRes.pipe(res, { end: true });
+          });
+
+          proxyReq.on('error', (err: any) => {
+            console.error('[Astrometry Proxy Error]:', err);
+            res.writeHead(500);
+            res.end('Proxy Error: ' + err.message);
+          });
+
+          if (bodyBuffer.length > 0) {
+            proxyReq.write(bodyBuffer);
           }
-
-          res.writeHead(proxyRes.statusCode || 200, resHeaders);
-          proxyRes.pipe(res, { end: true });
+          proxyReq.end();
         });
-
-        proxyReq.on('error', (err: any) => {
-          console.error('[Astrometry Proxy Error]:', err);
-          res.writeHead(500);
-          res.end('Proxy Error: ' + err.message);
-        });
-
-        req.pipe(proxyReq, { end: true });
       });
 
       proxyServer.on('error', (err: any) => {
@@ -127,9 +151,11 @@ const astrometryProxyPlugin = () => {
   };
 };
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ command, mode }) => {
     const env = loadEnv(mode, '.', '');
     const portNum = process.env.PORT ? parseInt(process.env.PORT) : 6003;
+    const isServe = command === 'serve';
+    const proxyPlugin = astrometryProxyPlugin(isServe);
     return {
       base: './',
       server: {
@@ -142,7 +168,7 @@ export default defineConfig(({ mode }) => {
         host: '0.0.0.0',
         allowedHosts: true,
       },
-      plugins: [react(), astrometryProxyPlugin()],
+      plugins: [react(), proxyPlugin],
       define: {
         'process.env.API_KEY': JSON.stringify(env.VITE_GEMINI_API_KEY),
         'process.env.GEMINI_API_KEY': JSON.stringify(env.VITE_GEMINI_API_KEY)
