@@ -251,7 +251,14 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({ fileEntry, isOpen, o
       if (!canvasRef.current) return;
       setSolving(true); setSolveMsg(t.solving);
       try {
-          const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+          const host = window.location.hostname;
+          const isLocalhost = 
+              host === 'localhost' || 
+              host === '127.0.0.1' || 
+              host.endsWith('.local') || 
+              host.startsWith('192.168.') || 
+              host.startsWith('10.') || 
+              host.startsWith('172.');
           const isGitHub = !isLocalhost;
           let useCorsProxy = false;
           let corsProxyUrl = 'https://api.allorigins.win/raw?url=';
@@ -278,7 +285,7 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({ fileEntry, isOpen, o
           } else if (isLocalhost && solverType === 'remote') {
               // ローカル開発環境でのリモート解決時は、自動起動された6004プロキシを介してCORS問題を回避します
               useCorsProxy = true;
-              corsProxyUrl = 'http://127.0.0.1:6004';
+              corsProxyUrl = `http://${window.location.hostname}:6004`;
           }
 
           const solver = new AstrometryService(
