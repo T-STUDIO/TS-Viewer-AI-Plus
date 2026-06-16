@@ -13,6 +13,12 @@ export interface WikiInfo {
 
 export async function fetchWikiInfo(query: string, lang: string): Promise<WikiInfo | null> {
   try {
+    // メシエ天体（M+数字）の競合を回避（M1戦車、M2歩兵戦闘車等ではなく、M1 (天体)、M31 (天体) 等に名寄せする）
+    let adjustedQuery = query.trim();
+    if (/^M\d+$/i.test(adjustedQuery)) {
+      adjustedQuery = `${adjustedQuery} (天体)`;
+    }
+
     // 1. Search Wikipedia for basic info and Wikidata ID
     // We use the 'query' action to get page props
     const wikiApi = `https://${lang}.wikipedia.org/w/api.php`;
@@ -21,7 +27,7 @@ export async function fetchWikiInfo(query: string, lang: string): Promise<WikiIn
       action: 'query',
       prop: 'pageprops|pageimages|extracts|info',
       inprop: 'url',
-      titles: query,
+      titles: adjustedQuery,
       pithumbsize: '400',
       exintro: '1',
       explaintext: '1',
