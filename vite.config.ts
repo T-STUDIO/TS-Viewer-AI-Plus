@@ -28,16 +28,47 @@ const astrometryProxyPlugin = () => {
 
         // Proxy request to nova.astrometry.net
         const targetUrl = new URL(req.url || '', 'https://nova.astrometry.net');
+
+        // Remove origin/referer headers to avoid triggering CORS redirect blocks or security checks on astrometry.net
+        const filteredHeaders = { ...req.headers };
+        delete filteredHeaders.host;
+        delete filteredHeaders.origin;
+        delete filteredHeaders.referer;
+
         const proxyReq = https.request({
           hostname: 'nova.astrometry.net',
           path: targetUrl.pathname + targetUrl.search,
           method: req.method,
           headers: {
-            ...req.headers,
+            ...filteredHeaders,
             host: 'nova.astrometry.net',
           }
         }, (proxyRes: any) => {
-          res.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
+          const resHeaders = { ...proxyRes.headers };
+
+          // Keep CORS simple and open
+          resHeaders['access-control-allow-origin'] = '*';
+          resHeaders['access-control-allow-methods'] = 'GET, POST, OPTIONS, PUT, PATCH, DELETE';
+          resHeaders['access-control-allow-headers'] = 'X-Requested-With,content-type,Authorization,request-json';
+
+          // Handle 3xx redirect Location header rewrite, to prevent browser from accessing nova.astrometry.net directly (which throws CORS error)
+          if (resHeaders.location) {
+            console.log(`[Astrometry CORS Proxy] Intercepted redirect location: ${resHeaders.location}`);
+            try {
+              const locUrl = new URL(resHeaders.location, 'https://nova.astrometry.net');
+              if (locUrl.hostname === 'nova.astrometry.net') {
+                const clientHost = req.headers.host || 'localhost:6004';
+                const isSecured = req.isSpdy || req.connection?.encrypted;
+                const proto = isSecured ? 'https' : 'http';
+                resHeaders.location = `${proto}://${clientHost}${locUrl.pathname}${locUrl.search}`;
+                console.log(`[Astrometry CORS Proxy] Rewrote redirect location to: ${resHeaders.location}`);
+              }
+            } catch (e) {
+              console.error('[Astrometry CORS Proxy] Failed to parse and rewrite location header:', e);
+            }
+          }
+
+          res.writeHead(proxyRes.statusCode || 200, resHeaders);
           proxyRes.pipe(res, { end: true });
         });
 
