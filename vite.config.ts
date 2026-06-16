@@ -9,70 +9,89 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const astrometryProxyPlugin = () => {
-  let proxyServer: http.Server | null = null;
+  let proxyServer: any = null;
 
   const startProxy = () => {
     if (proxyServer) return;
-    proxyServer = http.createServer((req, res) => {
-      // CORS headers
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE');
-      res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With,content-type,Authorization,request-json');
+    try {
+      proxyServer = http.createServer((req: any, res: any) => {
+        // CORS headers
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE');
+        res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With,content-type,Authorization,request-json');
 
-      if (req.method === 'OPTIONS') {
-        res.writeHead(200);
-        res.end();
-        return;
-      }
-
-      // Proxy request to nova.astrometry.net
-      const targetUrl = new URL(req.url || '', 'https://nova.astrometry.net');
-      const proxyReq = https.request({
-        hostname: 'nova.astrometry.net',
-        path: targetUrl.pathname + targetUrl.search,
-        method: req.method,
-        headers: {
-          ...req.headers,
-          host: 'nova.astrometry.net',
+        if (req.method === 'OPTIONS') {
+          res.writeHead(200);
+          res.end();
+          return;
         }
-      }, (proxyRes) => {
-        res.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
-        proxyRes.pipe(res, { end: true });
+
+        // Proxy request to nova.astrometry.net
+        const targetUrl = new URL(req.url || '', 'https://nova.astrometry.net');
+        const proxyReq = https.request({
+          hostname: 'nova.astrometry.net',
+          path: targetUrl.pathname + targetUrl.search,
+          method: req.method,
+          headers: {
+            ...req.headers,
+            host: 'nova.astrometry.net',
+          }
+        }, (proxyRes: any) => {
+          res.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
+          proxyRes.pipe(res, { end: true });
+        });
+
+        proxyReq.on('error', (err: any) => {
+          console.error('[Astrometry Proxy Error]:', err);
+          res.writeHead(500);
+          res.end('Proxy Error: ' + err.message);
+        });
+
+        req.pipe(proxyReq, { end: true });
       });
 
-      proxyReq.on('error', (err) => {
-        console.error('[Astrometry Proxy Error]:', err);
-        res.writeHead(500);
-        res.end('Proxy Error: ' + err.message);
+      proxyServer.on('error', (err: any) => {
+        console.error('[Astrometry CORS Proxy Server Error]:', err);
+        if (err.code === 'EADDRINUSE') {
+          console.warn('[Astrometry CORS Proxy] Port 6004 is already in use by another process. CORS proxy skip.');
+        }
+        proxyServer = null;
       });
 
-      req.pipe(proxyReq, { end: true });
-    });
-
-    proxyServer.listen(6004, '0.0.0.0', () => {
-      console.log('Astrometry CORS Proxy server automatically running on http://0.0.0.0:6004');
-    });
+      proxyServer.listen(6004, '0.0.0.0', () => {
+        console.log('Astrometry CORS Proxy server automatically running on http://0.0.0.0:6004');
+      });
+    } catch (e) {
+      console.error('[Astrometry CORS Proxy Setup Failed]:', e);
+      proxyServer = null;
+    }
   };
 
   return {
     name: 'astrometry-proxy-6004',
-    configureServer(server) {
+    configureServer(server: any) {
       startProxy();
       server.httpServer?.on('close', () => {
         if (proxyServer) {
-          proxyServer.close();
+          try {
+            proxyServer.close();
+          } catch (e) {}
           proxyServer = null;
         }
       });
     },
-    configurePreviewServer(server) {
+    configurePreviewServer(server: any) {
       startProxy();
-      server.httpServer?.on('close', () => {
-        if (proxyServer) {
-          proxyServer.close();
-          proxyServer = null;
-        }
-      });
+      if (server.httpServer) {
+        server.httpServer.on('close', () => {
+          if (proxyServer) {
+            try {
+              proxyServer.close();
+            } catch (e) {}
+            proxyServer = null;
+          }
+        });
+      }
     }
   };
 };
