@@ -3,15 +3,18 @@
  */
 import { GoogleGenAI } from '@google/genai';
 
-const getApiKey = () => {
+export const getApiKey = () => {
+  // 1. ローカル保存場所（localStorage）からキーを取得
   const savedKey = localStorage.getItem('gemini_api_key');
-  if (savedKey) return savedKey;
+  if (savedKey && savedKey.trim()) return savedKey.trim();
 
+  // 2. env.local に設定された VITE_GEMINI_API_KEY を取得
   const metaEnv = (import.meta as any).env;
-  if (metaEnv && metaEnv.VITE_GEMINI_API_KEY) return metaEnv.VITE_GEMINI_API_KEY;
+  if (metaEnv && metaEnv.VITE_GEMINI_API_KEY && metaEnv.VITE_GEMINI_API_KEY.trim()) {
+    return metaEnv.VITE_GEMINI_API_KEY.trim();
+  }
 
-  const env = (typeof process !== 'undefined' ? process.env : {});
-  return env.API_KEY || env.GEMINI_API_KEY || "";
+  return "";
 };
 
 const initAI = (): GoogleGenAI => {
@@ -127,10 +130,6 @@ Do not output any additional notes, markdown blocks, or text.
 
     let lastError: any = null;
 
-    // 現在キーの読み込みが成功していることを診断するログ
-    const activeKey = getApiKey();
-    console.log("[AI API Key Diagnostics] Key exists:", !!activeKey, "Length:", activeKey ? activeKey.length : 0);
-
     for (const configItem of modelsWithSchema) {
       try {
         console.log(`[AI] Attempting editImage with model: ${configItem.name} (useSchema: ${configItem.useSchema})`);
@@ -186,12 +185,7 @@ Do not output any additional notes, markdown blocks, or text.
     }
 
     const errorMsg = lastError?.message || String(lastError);
-    const isSavedKeyOk = !!activeKey;
-    throw new Error(`AI画像編集に失敗しました。
-【診断情報】
-・APIキー設定状態: ${isSavedKeyOk ? "有効に読み込まれています (文字数: " + activeKey.length + ")" : "未設定または読み込み失敗"}
-・エラー詳細: ${errorMsg}
-・解説: 503エラーが発生している場合、APIキー自体は正しくGoogle側へ届いていますが、一時的な同時アクセス集中によるサーバー高負荷、またはお使いのAPIキーの無料枠の上限（1分間あたりの制限など）に達している可能性があります。高負荷に強い最新のgemini-3.5-flash等のリトライを行いましたが、すべてで同様の制限が返されました。しばらくお時間を置くか、別の有効なAPIキーに変更してお試しください。`);
+    throw new Error(`AI画像編集に失敗しました。Error: ${errorMsg}`);
   } catch (error) {
     console.error("Edit Error:", error);
     throw error;

@@ -175,11 +175,15 @@ export class AstrometryService {
         : targetUrl.replace("https://nova.astrometry.net", this.corsProxyUrl.replace(/\/$/, ""));
 
       console.log(`[Solver Request] Using CORS Proxy: ${proxyUrl}`);
-      const res = await fetch(proxyUrl, fetchOptions);
-      if (!res.ok) {
-        throw new Error(`CORS Proxy (${this.corsProxyUrl}) がステータス ${res.status} を返しました。`);
+      try {
+        const res = await fetch(proxyUrl, fetchOptions);
+        if (res.ok) {
+          return res;
+        }
+        console.warn(`CORS Proxy (${this.corsProxyUrl}) がステータス ${res.status} を返したため、フォールバックを試みます。`);
+      } catch (proxyError) {
+        console.warn(`CORS Proxy へのフェッチ接続に失敗したため、他の手段へフォールバックします:`, proxyError);
       }
-      return res;
     }
 
     if (this.isLocal) {
@@ -191,7 +195,19 @@ export class AstrometryService {
       return res;
     }
 
-    // デフォルト（リモートかつCORSプロキシ指示なし） -> 従来のマルチプロキシフォールバックを使用
+    // デフォルト（リモートかつCORSプロキシ指示なし）
+    // まずCORSプロキシを介さない直接接続を最初の一手として試みます。
+    // 直接接続がCORS等の理由で失敗または応答しない場合のみ、従来のマルチプロキシフォールバックへ転送します。
+    try {
+      console.log(`[Solver Request] Trying direct fetch: ${targetUrl}`);
+      const directRes = await fetch(targetUrl, fetchOptions);
+      if (directRes.ok) {
+        return directRes;
+      }
+    } catch (directError) {
+      console.warn("[Solver Request] Direct fetch failed, falling back to multi-proxy...", directError);
+    }
+
     return fetchUrlWithProxy(targetUrl, options);
   }
 
