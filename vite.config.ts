@@ -42,28 +42,47 @@ const astrometryProxyPlugin = (shouldStart: boolean) => {
           // Proxy request to nova.astrometry.net
           const targetUrl = new URL(req.url || '', 'https://nova.astrometry.net');
 
-          // Remove origin/referer headers to avoid triggering CORS redirect blocks or security checks on astrometry.net
-          const filteredHeaders = { ...req.headers };
-          delete filteredHeaders.host;
-          delete filteredHeaders.origin;
-          delete filteredHeaders.referer;
+          console.log(`[Astrometry CORS Proxy] Incoming: ${req.method} ${req.url} (Body size: ${bodyBuffer.length} bytes)`);
 
-          // Adjust content-length dynamically
-          if (bodyBuffer.length > 0) {
-            filteredHeaders['content-length'] = String(bodyBuffer.length);
-          } else {
-            delete filteredHeaders['content-length'];
+          // Clean headers to prevent CORS redirects and WAF blockings on astrometry.net
+          const cleanHeaders: any = {
+            'host': 'nova.astrometry.net',
+            'user-agent': req.headers['user-agent'] || 'AstrometryProxy/1.0',
+            'accept': 'application/json, text/plain, */*',
+          };
+
+          // Only forward safe, necessary headers
+          const headersToForward = ['content-type', 'accept-language', 'accept-encoding', 'authorization', 'request-json'];
+          for (const key of headersToForward) {
+            if (req.headers[key] !== undefined) {
+              cleanHeaders[key] = req.headers[key];
+            }
           }
+
+          // Strict Content-Type formatting to avoid Python/CGI parser failures on astrometry.net
+          if (cleanHeaders['content-type']) {
+            const rawType = String(cleanHeaders['content-type']).toLowerCase();
+            if (rawType.startsWith('application/x-www-form-urlencoded')) {
+              cleanHeaders['content-type'] = 'application/x-www-form-urlencoded';
+            }
+          }
+
+          // Adjust content-length dynamically based on buffered request body
+          if (bodyBuffer.length > 0) {
+            cleanHeaders['content-length'] = String(bodyBuffer.length);
+          } else {
+            delete cleanHeaders['content-length'];
+          }
+
+          console.log(`[Astrometry CORS Proxy] Forwarding to: https://nova.astrometry.net${targetUrl.pathname}${targetUrl.search}`);
 
           const proxyReq = https.request({
             hostname: 'nova.astrometry.net',
             path: targetUrl.pathname + targetUrl.search,
             method: req.method,
-            headers: {
-              ...filteredHeaders,
-              host: 'nova.astrometry.net',
-            }
+            headers: cleanHeaders
           }, (proxyRes: any) => {
+            console.log(`[Astrometry CORS Proxy] Target responded: Status ${proxyRes.statusCode}`);
             const resHeaders = { ...proxyRes.headers };
 
             // Keep CORS simple and open
