@@ -8,14 +8,10 @@ import https from 'https';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const astrometryProxyPlugin = (shouldStart: boolean) => {
+const astrometryProxyPlugin = () => {
   let proxyServer: any = null;
 
   const startProxy = () => {
-    if (!shouldStart) {
-      console.log('[Astrometry CORS Proxy] Skip starting proxy: Only allowed on dev/preview server.');
-      return;
-    }
     if (proxyServer) return;
     try {
       proxyServer = http.createServer((req: any, res: any) => {
@@ -176,10 +172,8 @@ const astrometryProxyPlugin = (shouldStart: boolean) => {
 };
 
 export default defineConfig(({ command, mode }) => {
-    const env = loadEnv(mode, '.', '');
     const portNum = process.env.PORT ? parseInt(process.env.PORT) : 6003;
-    const isServe = command === 'serve';
-    const proxyPlugin = astrometryProxyPlugin(isServe);
+    const proxyPlugin = astrometryProxyPlugin();
     return {
       base: './',
       server: {
@@ -194,8 +188,7 @@ export default defineConfig(({ command, mode }) => {
       },
       plugins: [react(), proxyPlugin],
       define: {
-        'process.env.API_KEY': JSON.stringify(env.VITE_GEMINI_API_KEY),
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.VITE_GEMINI_API_KEY)
+        'process.env': {}
       },
       resolve: {
         alias: {
