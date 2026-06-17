@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Eye, EyeOff, Key } from 'lucide-react';
+import { getApiKey as getUnifiedApiKey } from '../services/geminiService';
 
 interface GeminiApiKeyModalProps {
   onClose?: () => void;
@@ -18,15 +19,17 @@ export const GeminiApiKeyModal: React.FC<GeminiApiKeyModalProps> = ({ onClose, l
     const params = new URLSearchParams(window.location.search);
     const setApiKeyParam = params.get('set_api_key');
     
-    const savedKey = localStorage.getItem('gemini_api_key');
+    const activeKey = getUnifiedApiKey();
+    const hasActiveKey = !!(activeKey && activeKey.trim());
     
     if (setApiKeyParam === 'true') {
       setIsReconfigMode(true);
       setIsOpen(true);
+      const savedKey = localStorage.getItem('gemini_api_key');
       if (savedKey) {
         setApiKey(savedKey);
       }
-    } else if (!savedKey) {
+    } else if (!hasActiveKey) {
       setIsOpen(true);
     }
   }, []);
