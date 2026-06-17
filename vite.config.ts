@@ -45,18 +45,25 @@ const astrometryProxyPlugin = (shouldStart: boolean) => {
           console.log(`[Astrometry CORS Proxy] Incoming: ${req.method} ${req.url} (Body size: ${bodyBuffer.length} bytes)`);
 
           // Clean headers to prevent CORS redirects and WAF blockings on astrometry.net
-          const cleanHeaders: any = {
-            'host': 'nova.astrometry.net',
-            'user-agent': req.headers['user-agent'] || 'AstrometryProxy/1.0',
-            'accept': 'application/json, text/plain, */*',
-          };
+          const cleanHeaders: any = {};
 
-          // Only forward safe, necessary headers
-          const headersToForward = ['content-type', 'accept-language', 'accept-encoding', 'authorization', 'request-json'];
-          for (const key of headersToForward) {
-            if (req.headers[key] !== undefined) {
+          // Copy safe headers from the original request
+          const headersToIgnore = ['host', 'origin', 'referer', 'cookie', 'cookie2', 'connection', 'content-length'];
+          for (const key of Object.keys(req.headers)) {
+            if (!headersToIgnore.includes(key.toLowerCase())) {
               cleanHeaders[key] = req.headers[key];
             }
+          }
+
+          // Force correct host for the destination target
+          cleanHeaders['host'] = 'nova.astrometry.net';
+          
+          if (!cleanHeaders['user-agent']) {
+            cleanHeaders['user-agent'] = 'AstrometryProxy/1.0';
+          }
+
+          if (!cleanHeaders['accept']) {
+            cleanHeaders['accept'] = 'application/json, text/plain, */*';
           }
 
           // Strict Content-Type formatting to avoid Python/CGI parser failures on astrometry.net
@@ -117,10 +124,8 @@ const astrometryProxyPlugin = (shouldStart: boolean) => {
             res.end('Proxy Error: ' + err.message);
           });
 
-          if (bodyBuffer.length > 0) {
-            proxyReq.write(bodyBuffer);
-          }
-          proxyReq.end();
+          // Send request with body buffer in one unified call to prevent chunks issues on target Python CGI/Django server
+          proxyReq.end(bodyBuffer);
         });
       });
 
