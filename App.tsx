@@ -282,7 +282,7 @@ const App: React.FC = () => {
 
   return (
     <div className="fixed inset-0 w-full h-full flex flex-col bg-gray-950 text-gray-200 overflow-hidden font-sans">
-      <input type="file" ref={fileInputRef} className="hidden" onChange={handleFallbackInputChange} {...(!isNativeSupported ? { webkitdirectory: "", directory: "" } : {})} multiple />
+      <input type="file" ref={fileInputRef} className="hidden" onChange={handleFallbackInputChange} multiple />
       <input type="file" ref={configInputRef} className="hidden" onChange={handleImportConfig} accept=".json" />
 
       {/* ●ヘッダー帯部分 */}
