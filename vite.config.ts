@@ -187,9 +187,6 @@ export default defineConfig(({ command, mode }) => {
         allowedHosts: true,
       },
       plugins: [react(), proxyPlugin],
-      define: {
-        'process.env': {}
-      },
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),
