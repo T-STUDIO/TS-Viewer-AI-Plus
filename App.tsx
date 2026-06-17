@@ -170,7 +170,8 @@ const App: React.FC = () => {
         setDirHandle(handle); setPath([{name: handle.name, handle}]); scanDirectory(handle);
       } catch (e: any) {
         if (e.name === 'AbortError') return;
-        setIsNativeSupported(false); fileInputRef.current?.click();
+        // サート状態自体は永久に無効化(false)せず、単に今回の実行時のみフォールバックを実行して警告を回避します
+        fileInputRef.current?.click();
       }
     } else { fileInputRef.current?.click(); }
   };
@@ -282,7 +283,7 @@ const App: React.FC = () => {
 
   return (
     <div className="fixed inset-0 w-full h-full flex flex-col bg-gray-950 text-gray-200 overflow-hidden font-sans">
-      <input type="file" ref={fileInputRef} className="hidden" onChange={handleFallbackInputChange} multiple />
+      <input type="file" ref={fileInputRef} className="hidden" onChange={handleFallbackInputChange} {...(!isNativeSupported ? { webkitdirectory: "", directory: "" } : {})} multiple />
       <input type="file" ref={configInputRef} className="hidden" onChange={handleImportConfig} accept=".json" />
 
       {/* ●ヘッダー帯部分 */}
