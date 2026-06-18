@@ -3,18 +3,58 @@
  */
 import { GoogleGenAI } from '@google/genai';
 
-export const getApiKey = () => {
-  // 1. ローカル保存場所（localStorage）からキーを取得
-  const savedKey = localStorage.getItem('gemini_api_key');
-  if (savedKey && savedKey.trim()) return savedKey.trim();
+export const isValidApiKeyFormat = (key: string | null | undefined): boolean => {
+  if (!key) return false;
+  const k = key.trim();
+  
+  const lowerK = k.toLowerCase();
+  if (
+    lowerK === "" ||
+    lowerK === "undefined" ||
+    lowerK === "null" ||
+    lowerK === "api_key" ||
+    lowerK === "your_api_key" ||
+    lowerK === "placeholder" ||
+    lowerK.includes("your-api-key") ||
+    lowerK.includes("insert_here")
+  ) {
+    return false;
+  }
 
-  // 2. env.local に設定された VITE_GEMINI_API_KEY を取得
+  // 最も厳格かつ安全：正規のGemini APIキーは通常 AIzaSy から始まり39文字程度。
+  // AIzaSyから始まり、長さが30文字以上の妥当な文字種（半角英数、アンダースコア、ハイフン）であること。
+  return k.startsWith('AIzaSy') && k.length >= 30 && /^[A-Za-z0-9_-]+$/.test(k);
+};
+
+export const getApiKey = () => {
+  // 1. ローカルストレージ（localStorage）からキーを取得
+  const savedKey = localStorage.getItem('gemini_api_key');
+  if (savedKey && isValidApiKeyFormat(savedKey)) {
+    return savedKey.trim();
+  }
+
+  // 2. 環境変数（.env.local）から取得
   const metaEnv = (import.meta as any).env;
-  if (metaEnv && metaEnv.VITE_GEMINI_API_KEY && metaEnv.VITE_GEMINI_API_KEY.trim()) {
-    return metaEnv.VITE_GEMINI_API_KEY.trim();
+  if (metaEnv && metaEnv.VITE_GEMINI_API_KEY) {
+    const envKey = String(metaEnv.VITE_GEMINI_API_KEY).trim();
+    if (isValidApiKeyFormat(envKey)) {
+      return envKey;
+    }
   }
 
   return "";
+};
+
+export const getSelectedModel = (): string => {
+  const savedModel = localStorage.getItem('gemini_model');
+  return savedModel || 'gemini-3.1-flash-image';
+};
+
+export const getFallbackModels = (preferredModel: string): string[] => {
+  // 画像処理（デフォルト: gemini-3.1-flash-image, gemini-3-pro-image-preview, gemini-2.5-flash-image）
+  const allModels = ['gemini-3.1-flash-image', 'gemini-3-pro-image-preview', 'gemini-2.5-flash-image'];
+  const models = [preferredModel, ...allModels.filter(m => m !== preferredModel)];
+  return Array.from(new Set(models));
 };
 
 const initAI = (): GoogleGenAI => {
@@ -75,17 +115,20 @@ export const getObjectSummary = async (objectName, language = 'ja') => {
       Ensure the tone is educational and accurate.
     `;
 
+    const fallbackModels = ['gemini-3.5-flash'];
+
     const { response, modelName } = await generateWithFallback(
       ai,
       prompt,
-      ['gemini-3.5-flash']
+      fallbackModels
     );
     console.log(`[AI] Object summary successful using model: ${modelName}`);
     return response.text;
   } catch (error: any) {
     console.error("Summary Error:", error);
     const errorMsg = error?.message || String(error);
-    return `要約の取得に失敗しました。Error: ${errorMsg}\n(一時的に高負荷状態(503)、または利用枠（クォータ）制限に達している可能性があります。数分置いて再度お試しいただくか、別のAPIキーをご利用ください。試行されたモデル: gemini-3.5-flash)`;
+    const fallbackModels = ['gemini-3.5-flash'];
+    return `要約の取得に失敗しました。Error: ${errorMsg}\n(一時的に高負荷状態(503)、または利用枠（クォータ）制限に達している可能性があります。数分置いて再度お試しいただくか、別のAPIキーをご利用ください。試行されたモデル: ${fallbackModels.join(', ')})`;
   }
 };
 
@@ -93,20 +136,25 @@ export const getObjectSummary = async (objectName, language = 'ja') => {
 export const analyzeImage = async (base64Data, mimeType, prompt = "この画像を説明してください") => {
   try {
     const ai = initAI();
+    const preferredModel = getSelectedModel();
+    const fallbackModels = getFallbackModels(preferredModel);
+
     const { response, modelName } = await generateWithFallback(
       ai,
       [
         prompt,
         { inlineData: { data: base64Data, mimeType } }
       ],
-      ['gemini-3.5-flash']
+      fallbackModels
     );
     console.log(`[AI] Image analysis successful using model: ${modelName}`);
     return response.text;
   } catch (error: any) {
     console.error("Analyze Error:", error);
     const errorMsg = error?.message || String(error);
-    return `解析エラー: ${errorMsg}\n(一時的なアクセス集中(503)等により、全てのモデルでエラーが返されました。しばらく時間を置いてから再度お試しください。試行モデル: gemini-3.5-flash)`;
+    const preferredModel = getSelectedModel();
+    const fallbackModels = getFallbackModels(preferredModel);
+    return `解析エラー: ${errorMsg}\n(一時的なアクセス集中(503)等により、全てのモデルでエラーが返されました。しばらく時間を置いてから再度お試しください。試行モデル: ${fallbackModels.join(', ')})`;
   }
 };
 
@@ -123,10 +171,14 @@ Do not output any additional notes, markdown blocks, or text.
 `;
 
     // 試行するモデル構成
-    const modelsWithSchema = [
-      { name: 'gemini-3.5-flash', useSchema: true },
-      { name: 'gemini-3.5-flash', useSchema: false }
-    ];
+    const preferredModel = getSelectedModel();
+    const fallbackModels = getFallbackModels(preferredModel);
+
+    const modelsWithSchema: { name: string; useSchema: boolean }[] = [];
+    for (const m of fallbackModels) {
+      modelsWithSchema.push({ name: m, useSchema: true });
+      modelsWithSchema.push({ name: m, useSchema: false });
+    }
 
     let lastError: any = null;
 
@@ -185,7 +237,7 @@ Do not output any additional notes, markdown blocks, or text.
     }
 
     const errorMsg = lastError?.message || String(lastError);
-    throw new Error(`AI画像編集に失敗しました。Error: ${errorMsg}`);
+    throw new Error(`AI画像編集に失敗しました。Error: ${errorMsg} (試行モデル: ${fallbackModels.join(', ')})`);
   } catch (error) {
     console.error("Edit Error:", error);
     throw error;

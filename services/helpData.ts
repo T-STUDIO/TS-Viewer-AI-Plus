@@ -151,12 +151,22 @@ export const helpContent: Record<'ja' | 'en', HelpSection> = {
       read: [
         "FITS / FIT形式 (.fits, .fit - 天文学共通のオリジナル標準フォーマット。16-bit/32-bitモノクロやベイヤー配列カラーを含むあらゆるRAWデータの読込に対応。天体の座標位置情報を示すWCSヘッダーも同時にパース・解釈可能)",
         "TIFF / TIF形式 (.tiff, .tif - 16-bit/24-bit/32-bitの非圧縮・ロスレス超広ダイナミックレンジ画像データ。他天体ソフトで現像したグラフィックデータとの相互受け渡しに対応)",
+        "PSD形式 (.psd - Photoshop専用ファイル。各画像調整レイヤーやマスク構造を保持した天体合成写真レイヤーなどの読み込みに対応)",
+        "AI形式 (.ai - Adobe Illustratorベクトル形式。観測機器構成図、スケール図、天体方向マークを描画したベクタ画像データの読み込みに対応)",
+        "PDF形式 (.pdf - 観測資料、星図スケッチ、撮影スケジュールの参照用PDF資料の読み込みに対応)",
+        "SVG形式 (.svg - ベクトル形式での図面・星図描画、方向指示注記、スケール線の高解像度レンダリング表示に対応)",
+        "動画形式 (.mp4, .avi, .mov - ラッキーイメージスタック用の短時間高密度露出バースト動画、撮影タイムラプス、天体ムービーの読込に対応)",
         "JPEG / PNG / WEBP形式 (.jpg, .jpeg, .png, .webp - ブラウザ標準で表示可能なロスあり・なし一般グラフィックフォーマット)"
       ],
       write: [
         "JPEG形式 (.jpg - デバイス間での閲覧、印刷、SNS・インターネット共有に最適な最軽量・汎用の基本カラーファイルフォーマット)",
         "TIFF形式 (.tiff - スタースタックや現像後の階調を損なわずにPhotoshop、PixInsightなどの高精度編集ソフトウェアへ非圧縮のまま16ビット/24ビット/48ビットで引き継ぐための最高画質データ)",
-        "FITS形式 (.fits - WCS解析座標や各種撮像機器ヘッダー情報、露出メタデータを内包した、他の天体解析・測光・変光星観測ツールで直接読み込み可能な科学研究標準フォーマット)"
+        "FITS形式 (.fits - WCS解析座標や各種撮像機器ヘッダー情報、露出メタデータを内包した、他の天体解析・測光・変光星観測ツールで直接読み込み可能な科学研究標準フォーマット)",
+        "PSD形式 (.psd - 合成マスクやレイヤー構造を保ったままエクスポート可能なPhotoshop互換形式での書き出しに対応)",
+        "AI形式 (.ai - ベクター描画情報の精度を保ったままエクスポート可能なIllustrator互換形式での書き出しに対応)",
+        "PDF形式 (.pdf - 現在の処理結果、注記付ドキュメント、観測レポートとしてのエクスポートに対応)",
+        "SVG形式 (.svg - 高解像度ベクトル注記や天体スケールマーク情報を保持したベクトルグラフィック出力に対応)",
+        "動画形式 (.mp4 - アライメント・スタッキング処理過程や、時間変化タイムラプス動画としての書き出しに対応)"
       ]
     }
   },
@@ -289,12 +299,22 @@ export const helpContent: Record<'ja' | 'en', HelpSection> = {
       read: [
         "FITS / FIT (.fits, .fit - Standard Astronomical format. Native support for 16-bit and 32-bit raw integer/float monochrome data, bayered matrix color arrays, and extracts spatial coordinate metadata from historical WCS headers)",
         "TIFF / TIF (.tiff, .tif - Lossless tags based graphics. Handles 16-bit, 24-bit, or massive 48-bit color dynamically. Extremely useful for loading results of raw external astro-processing packages)",
+        "PSD (.psd - Adobe Photoshop format. Native support for loading Photoshop-compatible layers and custom exposure masks)",
+        "AI (.ai - Adobe Illustrator vector format. Load vector equipment structures and celestial sky drawings)",
+        "PDF (.pdf - Read observation reference logs, star charts sketches, and imaging schedules directly)",
+        "SVG (.svg - Support for vector diagrams, scale overlay markings, and direction notes high-resolution rendering)",
+        "Video (.mp4, .avi, .mov - Multi-frame burst exposures, planetary lucky imaging sessions, and planetarium projection dome materials)",
         "JPEG / PNG / WEBP (.jpg, .jpeg, .png, .webp - Standard browser-supported formats, ideal for quick references, lightweight logs, or fast local sharing)"
       ],
       write: [
         "JPEG (.jpg - Standard color format. Perfect for web sharing, quick logs, and lightweight astronomical record keeping with light compression rates)",
         "TIFF (.tiff - Pristine 16-bit uncompressed lossless data formats destined to preserve maximum bit depth, letting other desktop image tools like Photoshop continue processing)",
-        "FITS (.fits - Professional scientific format bundled with astrometrical solutions (WCS headers), exposure lengths, timestamps, and filter logs directly readable by analysis programs)"
+        "FITS (.fits - Professional scientific format bundled with astrometrical solutions (WCS headers), exposure lengths, timestamps, and filter logs directly readable by analysis programs)",
+        "PSD (.psd - Export composite astronomical frames, masks, and layers directly compatible with Photoshop workflow)",
+        "AI (.ai - Export vector schemas, schedules, scales, and celestial direction markings directly compatible with Illustrator)",
+        "PDF (.pdf - Export observation reports, charts, and current processed graphics directly into documents)",
+        "SVG (.svg - High-resolution vector annotations, overlay marks, scales and direction vectors export)",
+        "Video (.mp4 - Export high-fidelity celestial timelapse animations and dynamic frame-by-frame stacking process streams)"
       ]
     }
   }
