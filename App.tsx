@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  FolderOpen, Folder, LayoutGrid, Search, Languages, Download, FileUp, Home, ChevronRight, UploadCloud, AlertTriangle, Settings, FolderSync, Check, Layers, HelpCircle
+  FolderOpen, Folder, LayoutGrid, Search, Languages, Download, FileUp, Home, ChevronRight, UploadCloud, AlertTriangle, Settings, FolderSync, Check, Layers, HelpCircle, Key
 } from 'lucide-react';
 import { 
   FileSystemDirectoryHandle, FileSystemFileHandle, FileSystemHandle,
@@ -58,7 +58,17 @@ const App: React.FC = () => {
   const [stackingProgress, setStackingProgress] = useState(0);
   const [stackingMsg, setStackingMsg] = useState('');
   const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const [modalKey, setModalKey] = useState(0);
   const configInputRef = useRef<HTMLInputElement>(null);
+
+  const handleOpenApiKeySettings = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('set_api_key', 'true');
+    window.history.replaceState({}, '', url.toString());
+    setModalKey(prev => prev + 1);
+  };
+
+
 
   const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
@@ -166,12 +176,12 @@ const App: React.FC = () => {
   const handleOpenDirectory = async () => {
     if (isNativeSupported && !isMobile) {
       try {
-        const handle = await window.showDirectoryPicker({ mode: 'read' });
-        setDirHandle(handle); setPath([{name: handle.name, handle}]); scanDirectory(handle);
+         const handle = await window.showDirectoryPicker({ mode: 'read' });
+         setDirHandle(handle); setPath([{name: handle.name, handle}]); scanDirectory(handle);
       } catch (e: any) {
-        if (e.name === 'AbortError') return;
-        // サート状態自体は永久に無効化(false)せず、単に今回の実行時のみフォールバックを実行して警告を回避します
-        fileInputRef.current?.click();
+         // UI/制限環境向け確実動作：ダイアログエラー/セキュリティ例外/キャンセル時すべてで、
+         // 確実に安全なフォルダ選択プロンプト（webkitdirectory付きinput）を呼び出して救済します。
+         fileInputRef.current?.click();
       }
     } else { fileInputRef.current?.click(); }
   };
@@ -283,7 +293,7 @@ const App: React.FC = () => {
 
   return (
     <div className="fixed inset-0 w-full h-full flex flex-col bg-gray-950 text-gray-200 overflow-hidden font-sans">
-      <input type="file" ref={fileInputRef} className="hidden" onChange={handleFallbackInputChange} {...(!isNativeSupported ? { webkitdirectory: "", directory: "" } : {})} multiple />
+      <input type="file" ref={fileInputRef} className="hidden" onChange={handleFallbackInputChange} {...({ webkitdirectory: "", directory: "" })} multiple />
       <input type="file" ref={configInputRef} className="hidden" onChange={handleImportConfig} accept=".json" />
 
       {/* ●ヘッダー帯部分 */}
@@ -308,8 +318,10 @@ const App: React.FC = () => {
               <button onClick={handleExportConfig} className="p-2 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white transition-colors" title={t.exportSettings}><Download size={18}/></button>
               <button onClick={() => configInputRef.current?.click()} className="p-2 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white transition-colors" title={t.importSettings}><FileUp size={18}/></button>
            </div>
-           <button onClick={() => setIsHelpOpen(true)} className="p-2.5 hover:bg-white/10 rounded-xl text-gray-400 hover:text-white border border-white/5 transition-all" title={lang === 'ja' ? 'ヘルプを表示' : 'Show Help'}><HelpCircle size={20} /></button>
+           <button onClick={handleOpenApiKeySettings} className="p-2.5 hover:bg-white/10 rounded-xl text-gray-400 hover:text-white border border-white/5 transition-all" title={lang === 'ja' ? 'APIキー / モデル設定' : 'API Key & Model Settings'}><Key size={20} /></button>
+            <button onClick={() => setIsHelpOpen(true)} className="p-2.5 hover:bg-white/10 rounded-xl text-gray-400 hover:text-white border border-white/5 transition-all" title={lang === 'ja' ? 'ヘルプを表示' : 'Show Help'}><HelpCircle size={20} /></button>
            <button onClick={() => setLang(l => l === 'en' ? 'ja' : 'en')} className="p-2.5 hover:bg-white/10 rounded-xl text-gray-400 hover:text-white border border-white/5 transition-all"><Languages size={20} /></button>
+
            {dirHandle && (
               <button onClick={handleOpenDirectory} className="p-2.5 hover:bg-white/10 rounded-xl text-blue-400 hover:text-blue-300 border border-blue-500/20 transition-all"><FolderSync size={20} /></button>
            )}
@@ -505,7 +517,7 @@ const App: React.FC = () => {
       {previewFile && <PreviewModal fileEntry={previewFile} isOpen={true} onClose={() => setPreviewFile(null)} onNavigate={() => {}} hasNext={false} hasPrev={false} lang={lang} />}
       
       {/* ●BYOK APIキー 登録/変更モーダル */}
-      <GeminiApiKeyModal lang={lang} />
+      <GeminiApiKeyModal key={modalKey} lang={lang} />
 
       {/* ●ヘルプモーダル */}
       <HelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} lang={lang} />
