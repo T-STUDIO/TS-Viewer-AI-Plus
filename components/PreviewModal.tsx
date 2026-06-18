@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { X, Loader2, SlidersHorizontal, List, Sparkles, ScanSearch, Eraser, MousePointer2, ChevronDown, Save, RotateCcw, Palette, MapPin, Check, Mic, MicOff, BookmarkPlus, Undo2, Map as MapIcon, ExternalLink, Eye, EyeOff, Info, Globe, Search as SearchIcon, Maximize, ZoomIn, ZoomOut } from 'lucide-react';
+import { X, Loader2, SlidersHorizontal, List, Sparkles, ScanSearch, Eraser, MousePointer2, ChevronDown, Save, RotateCcw, Palette, MapPin, Check, Undo2, Map as MapIcon, ExternalLink, Eye, EyeOff, Info, Globe, Search as SearchIcon, Maximize, ZoomIn, ZoomOut, Mic, MicOff, BookmarkPlus, Play, Pause } from 'lucide-react';
 import { FileEntry } from '../types';
 import { editImage, getObjectSummary } from '../services/geminiService';
 import { parseFits, renderFitsToCanvas, writeFits, generateFitsHeaderString } from '../services/fitsUtils';
@@ -39,6 +39,7 @@ const isPointInPolygon = (point: {x:number, y:number}, polygon: {x:number, y:num
 export const PreviewModal: React.FC<PreviewModalProps> = ({ fileEntry, isOpen, onClose, lang }) => {
   const t = translations[lang].preview;
   const [activePanel, setActivePanel] = useState<ActivePanel>('none');
+  const [pdfFileUrl, setPdfFileUrl] = useState<string>('');
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
@@ -97,6 +98,32 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({ fileEntry, isOpen, o
   const [isListening, setIsListening] = useState(false);
   const [savedPrompts, setSavedPrompts] = useState<string[]>(() => JSON.parse(localStorage.getItem('saved_ai_prompts') || '[]'));
   const recognitionRef = useRef<any>(null);
+
+  const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null);
+  const [isVideoPlaying, setIsVideoPlaying] = useState(false);
+  const [videoDuration, setVideoDuration] = useState(0);
+  const [videoCurrentTime, setVideoCurrentTime] = useState(0);
+
+  useEffect(() => {
+    let animId: number;
+    const updateFrame = () => {
+      if (videoElement && !videoElement.paused && !videoElement.ended) {
+        const sCanvas = sourceCanvasRef.current;
+        if (sCanvas) {
+          const sCtx = sCanvas.getContext('2d', { willReadFrequently: true });
+          sCtx?.clearRect(0, 0, sCanvas.width, sCanvas.height);
+          sCtx?.drawImage(videoElement, 0, 0, sCanvas.width, sCanvas.height);
+          setVideoCurrentTime(videoElement.currentTime);
+          setImageVersion(v => v + 1);
+        }
+        animId = requestAnimationFrame(updateFrame);
+      }
+    };
+    if (isVideoPlaying && videoElement) {
+      animId = requestAnimationFrame(updateFrame);
+    }
+    return () => cancelAnimationFrame(animId);
+  }, [isVideoPlaying, videoElement]);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const histogramRef = useRef<HTMLCanvasElement>(null);
@@ -182,6 +209,12 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({ fileEntry, isOpen, o
   const loadFile = async (entry: FileEntry) => {
     try {
       const file = await entry.handle.getFile();
+      if (entry.extension === 'pdf') {
+          const url = URL.createObjectURL(file);
+          setPdfFileUrl(url);
+          setLoading(false);
+          return;
+      }
       const sCanvas = sourceCanvasRef.current; if (!sCanvas) return;
       const sCtx = sCanvas.getContext('2d', { willReadFrequently: true });
       const setup = (img: HTMLImageElement | HTMLCanvasElement) => {
@@ -200,12 +233,70 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({ fileEntry, isOpen, o
       } else if (['tiff','tif'].includes(entry.extension)) {
           const temp = document.createElement('canvas'); await renderTiffToCanvas(file, temp); setup(temp);
           getImageMetadata(file).then(setMetadata);
+      } else if (entry.extension === 'psd') {
+          if (!(window as any).agPsd) {
+              throw new Error("agPsd is not ready");
+          }
+          const buf = await file.arrayBuffer();
+          const psd = (window as any).agPsd.readPsd(buf);
+          const temp = document.createElement('canvas');
+          temp.width = psd.width;
+          temp.height = psd.height;
+          (window as any).agPsd.drawPsd(temp.getContext('2d')!, psd);
+          setup(temp);
+          getImageMetadata(file).then(setMetadata);
+      } else if (entry.extension === 'ai') {
+          const img = new Image(); img.src = URL.createObjectURL(file);
+          img.onload = () => { setup(img); URL.revokeObjectURL(img.src); };
+          getImageMetadata(file).then(setMetadata);
+      } else if (['mp4', 'avi', 'mov', 'webm'].includes(entry.extension)) {
+          const video = document.createElement('video');
+          video.src = URL.createObjectURL(file);
+          video.muted = true;
+          video.playsInline = true;
+          video.onloadeddata = () => {
+              video.width = video.videoWidth;
+              video.height = video.videoHeight;
+              setVideoDuration(video.duration);
+              const temp = document.createElement('canvas');
+              temp.width = video.videoWidth;
+              temp.height = video.videoHeight;
+              const ctx = temp.getContext('2d');
+              ctx?.drawImage(video, 0, 0);
+              setup(temp);
+              setVideoElement(video);
+          };
       } else {
           const img = new Image(); img.src = URL.createObjectURL(file);
           img.onload = () => { setup(img); URL.revokeObjectURL(img.src); };
           getImageMetadata(file).then(setMetadata);
       }
     } catch (err) { console.error(err); setLoading(false); }
+  };
+
+  const handlePlayPause = () => {
+    if (!videoElement) return;
+    if (videoElement.paused) {
+      videoElement.play();
+      setIsVideoPlaying(true);
+    } else {
+      videoElement.pause();
+      setIsVideoPlaying(false);
+    }
+  };
+
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!videoElement) return;
+    const t = parseFloat(e.target.value);
+    videoElement.currentTime = t;
+    setVideoCurrentTime(t);
+    const sCanvas = sourceCanvasRef.current;
+    if (sCanvas) {
+      const sCtx = sCanvas.getContext('2d', { willReadFrequently: true });
+      sCtx?.clearRect(0, 0, sCanvas.width, sCanvas.height);
+      sCtx?.drawImage(videoElement, 0, 0, sCanvas.width, sCanvas.height);
+      setImageVersion(v => v + 1);
+    }
   };
 
   const handleSave = async (format: string) => {
@@ -236,6 +327,116 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({ fileEntry, isOpen, o
         } else if (format === 'jpeg') {
             const tempBlob = await new Promise<Blob>(r => canvas.toBlob(r!, 'image/jpeg', 0.95));
             blob = await injectJpegComment(tempBlob, wcsString);
+        } else if (format === 'psd') {
+            if (!(window as any).agPsd) {
+                throw new Error("agPsd is not ready");
+            }
+            const psdData = {
+                width: canvas.width,
+                height: canvas.height,
+                children: [
+                    {
+                        name: 'Astro Base Layer',
+                        canvas: canvas
+                    }
+                ]
+            };
+            const buffer = (window as any).agPsd.writePsd(psdData);
+            blob = new Blob([buffer], { type: 'image/vnd.adobe.photoshop' });
+        } else if (format === 'ai') {
+            const w = canvas.width, h = canvas.height;
+            const svgString = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
+  <image href="${canvas.toDataURL('image/png')}" width="${w}" height="${h}"/>
+  <g stroke="#10B981" stroke-width="2" fill="none" font-family="monospace">
+    <circle cx="${w/2}" cy="${h/2}" r="40" stroke="#10B981" />
+    <line x1="${w/2}" y1="${h/2 - 50}" x2="${w/2}" y2="${h/2 + 50}" />
+    <line x1="${w/2 - 50}" y1="${h/2}" x2="${w/2 + 50}" y2="${h/2}" />
+    <text x="${w/2 + 10}" y="${h/2 - 15}" fill="#10B981" font-size="14">EQUATORIAL COORD FOCUS</text>
+    <path d="M ${w - 60} 60 L ${w - 60} 20 L ${w - 70} 30 M ${w - 60} 20 L ${w - 50} 30" stroke="#EF4444" stroke-width="3"/>
+    <text x="${w - 65}" y="80" fill="#EF4444" font-size="14">N</text>
+  </g>
+</svg>`;
+            blob = new Blob([svgString], { type: 'application/postscript' });
+        } else if (format === 'svg') {
+            const w = canvas.width, h = canvas.height;
+            const imgData = canvas.toDataURL('image/png');
+            let annotationsSvg = '';
+            if (showAnnotations && annotations && annotations.length > 0) {
+              annotations.forEach(ann => {
+                annotationsSvg += `<g>
+                  <circle cx="${ann.pixelx}" cy="${ann.pixely}" r="${Math.max(10, 18/zoom)}" fill="none" stroke="#fbbf24" stroke-width="3" />
+                  <text x="${ann.pixelx + 15}" y="${ann.pixely - 15}" fill="#fbbf24" font-family="sans-serif" font-size="16" font-weight="bold">${ann.names[0]}</text>
+                </g>`;
+              });
+            }
+            const svgString = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
+  <image href="${imgData}" width="${w}" height="${h}"/>
+  <g stroke="#ef4444" stroke-width="2" fill="none">
+    <path d="M ${w - 60} 60 L ${w - 60} 20 L ${w - 70} 30 M ${w - 60} 20 L ${w - 50} 30" stroke-width="3" />
+    <text x="${w - 65}" y="80" fill="#ef4444" font-family="sans-serif" font-size="14" font-weight="bold">N</text>
+  </g>
+  ${annotationsSvg}
+</svg>`;
+            blob = new Blob([svgString], { type: 'image/svg+xml' });
+        } else if (format === 'pdf') {
+            const w = canvas.width, h = canvas.height;
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+            const base64Data = dataUrl.split(',')[1];
+            const binaryString = atob(base64Data);
+            const imgLength = binaryString.length;
+            const imgBytes = new Uint8Array(imgLength);
+            for (let i = 0; i < imgLength; i++) {
+                imgBytes[i] = binaryString.charCodeAt(i);
+            }
+            const encoder = new TextEncoder();
+            const header = encoder.encode(
+              `%PDF-1.2\n` +
+              `1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n` +
+              `2 0 obj\n<< /Type /Pages /Kids [ 3 0 R ] /Count 1 >>\nendobj\n` +
+              `3 0 obj\n<< /Type /Page /Parent 2 0 R /Resources << /XObject << /Im1 4 0 R >> >> /MediaBox [ 0 0 ${w} ${h} ] /Contents 5 0 R >>\nendobj\n` +
+              `4 0 obj\n<< /Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${imgLength} >>\nstream\n`
+            );
+            const footer = encoder.encode(
+              `\nendstream\nendobj\n` +
+              `5 0 obj\n<< /Length 40 >>\nstream\n` +
+              `${w} 0 0 ${h} 0 0 cm\n/Im1 Do\n` +
+              `endstream\nendobj\n` +
+              `xref\n0 6\n0000000000 65535 f\n` +
+              `trailer\n<< /Size 6 /Root 1 0 R >>\n` +
+              `%%EOF\n`
+            );
+            const pdfBytes = new Uint8Array(header.length + imgBytes.length + footer.length);
+            pdfBytes.set(header, 0);
+            pdfBytes.set(imgBytes, header.length);
+            pdfBytes.set(footer, header.length + imgBytes.length);
+            blob = new Blob([pdfBytes], { type: 'application/pdf' });
+        } else if (format === 'mp4') {
+            const stream = (canvas as any).captureStream(30);
+            const mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+            const chunks: Blob[] = [];
+            mediaRecorder.ondataavailable = (ev) => { if (ev.data.size > 0) chunks.push(ev.data); };
+            mediaRecorder.onstop = () => {
+                const videoBlob = new Blob(chunks, { type: 'video/webm' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(videoBlob);
+                a.download = `export_${Date.now()}.webm`;
+                a.click();
+            };
+            mediaRecorder.start();
+            if (videoElement) {
+                videoElement.currentTime = 0;
+                videoElement.play();
+                setIsVideoPlaying(true);
+                setTimeout(() => {
+                    videoElement.pause();
+                    setIsVideoPlaying(false);
+                    mediaRecorder.stop();
+                }, videoElement.duration * 1000);
+            } else {
+                setTimeout(() => { mediaRecorder.stop(); }, 3000);
+            }
+            setLoading(false);
+            return;
         } else {
             blob = await new Promise(r => canvas.toBlob(r, `image/${format}`, 0.95));
         }
@@ -409,7 +610,7 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({ fileEntry, isOpen, o
       setIsListening(false);
     } else {
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      if (!SpeechRecognition) { alert(t.micNotSupported); return; }
+      if (!SpeechRecognition) { alert(t.micNotSupported || "Speech Recognition not supported in this browser"); return; }
       const recognition = new SpeechRecognition();
       recognition.lang = lang === 'ja' ? 'ja-JP' : 'en-US';
       recognition.onresult = (event: any) => {
@@ -423,6 +624,57 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({ fileEntry, isOpen, o
     }
   };
 
+  const handleGetGPSLocation = () => {
+    if (!navigator.geolocation) {
+      alert(lang === 'ja' ? '位置情報APIが非対応です。' : 'Geolocation is not supported by your browser.');
+      return;
+    }
+    
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        const latVal = latitude;
+        const lngVal = longitude;
+        
+        setMetadata(prev => {
+          const currentItems = prev?.items ? [...prev.items] : [];
+          const filteredItems = currentItems.filter(item => item.key !== 'Latitude' && item.key !== 'Longitude');
+          filteredItems.push({ key: 'Latitude', value: latVal.toFixed(6), group: 'Location' });
+          filteredItems.push({ key: 'Longitude', value: lngVal.toFixed(6), group: 'Location' });
+          
+          return {
+            ...prev,
+            items: filteredItems,
+            gps: { lat: latVal, lng: lngVal }
+          };
+        });
+        
+        alert(lang === 'ja' 
+          ? `GPSから現在の観測地を取得しました:\n緯度: ${latVal.toFixed(6)}\n経度: ${lngVal.toFixed(6)}`
+          : `Coordinates successfully updated:\nLatitude: ${latVal.toFixed(6)}\nLongitude: ${lngVal.toFixed(6)}`
+        );
+      },
+      (error) => {
+        let msg = '';
+        switch(error.code) {
+          case error.PERMISSION_DENIED:
+            msg = lang === 'ja' ? '位置情報の使用許可が拒否されました。再度ブラウザで許可を与えてください。' : 'User denied the request for Geolocation. Please re-enable permissions.';
+            break;
+          case error.POSITION_UNAVAILABLE:
+            msg = lang === 'ja' ? '位置情報が利用できません。' : 'Location information is unavailable.';
+            break;
+          case error.TIMEOUT:
+            msg = lang === 'ja' ? '位置情報の取得タイムアウトが発生しました。' : 'The request to get user location timed out.';
+            break;
+          default:
+            msg = error.message;
+        }
+        alert(lang === 'ja' ? `位置情報の取得に失敗しました:\n${msg}` : `Failed to get geolocation:\n${msg}`);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  };
+
   const savePrompt = () => {
     if (!aiPrompt.trim()) return;
     const next = [aiPrompt, ...savedPrompts.filter(p => p !== aiPrompt)].slice(0, 10);
@@ -433,8 +685,18 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({ fileEntry, isOpen, o
   useEffect(() => {
     if (fileEntry && isOpen) {
       setLoading(true); setActivePanel('none'); clearSelections(); resetAdjustments(); setIsDirty(false); setUndoStack([]); setAnnotations([]); setSelectedAnnotation(null); setSearchedObject(null);
+      setPdfFileUrl(prev => {
+        if (prev) URL.revokeObjectURL(prev);
+        return '';
+      });
       setTimeout(() => loadFile(fileEntry), 100);
     }
+    return () => {
+      setPdfFileUrl(prev => {
+        if (prev) URL.revokeObjectURL(prev);
+        return '';
+      });
+    };
   }, [fileEntry, isOpen]);
 
   useEffect(() => {
@@ -495,8 +757,8 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({ fileEntry, isOpen, o
             <div className="w-px h-6 bg-white/5 mx-1"></div>
             <button type="button" onClick={() => setShowSaveMenu(!showSaveMenu)} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg transition-all active:scale-95 cursor-pointer"><Save size={14}/> {t.saveProcessedImage}</button>
             {showSaveMenu && (
-                <div className="absolute right-4 top-14 flex flex-col bg-gray-900 border border-white/10 rounded-2xl overflow-hidden shadow-2xl z-[160] w-48">
-                    {['fits','jpeg','heic','png','tiff'].map(f => <button key={f} onClick={() => handleSave(f)} className="px-5 py-3 text-left text-[9px] font-black hover:bg-blue-600 uppercase border-b border-white/5 last:border-0">{f}</button>)}
+                <div className="absolute right-4 top-14 flex flex-col bg-gray-900 border border-white/10 rounded-2xl overflow-hidden shadow-2xl z-[160] w-48 max-h-[300px] overflow-y-auto">
+                    {['fits','jpeg','heic','png','tiff','psd','ai','svg','pdf','mp4'].map(f => <button key={f} onClick={() => handleSave(f)} className="px-5 py-3 text-left text-[9px] font-black hover:bg-blue-600 uppercase border-b border-white/5 last:border-0">{f}</button>)}
                 </div>
             )}
          </div>
@@ -532,82 +794,114 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({ fileEntry, isOpen, o
             onClick={(e) => { if (selectionMode) { const c = getCoords(e); if (allSelections.some(p => isPointInPolygon(c, p))) commitAdjustment(); } }} 
             className={`relative flex-1 bg-black flex items-center justify-center overflow-hidden touch-none ${selectionMode ? 'cursor-crosshair' : 'cursor-grab'} ${isPanning ? 'cursor-grabbing' : ''}`}
           >
-              <div style={{ position: 'absolute', left: '50%', top: '50%', width: intrinsicSize.width, height: intrinsicSize.height, marginLeft: -intrinsicSize.width / 2, marginTop: -intrinsicSize.height / 2, transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`, transition: (isDrawing || isPanning) ? 'none' : 'transform 0.15s ease-out' }}>
-                 <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block' }} />
-                 <svg className="absolute inset-0 overflow-visible pointer-events-none" viewBox={`${-intrinsicSize.width/2} ${-intrinsicSize.height/2} ${intrinsicSize.width} ${intrinsicSize.height}`}>
-                    {showAnnotations && annotations.map((ann, i) => (
-                        <g key={i} className="cursor-pointer group pointer-events-auto" onClick={(e) => { e.stopPropagation(); handleSelectObject(ann); }}>
-                            <circle cx={ann.pixelx - intrinsicSize.width/2} cy={ann.pixely - intrinsicSize.height/2} r={Math.max(10, 18/zoom)} fill="none" stroke={selectedAnnotation === ann ? "#60a5fa" : "#fbbf24"} strokeWidth={3/zoom} className="group-hover:stroke-blue-400 group-hover:r-[22/zoom] transition-all" />
-                            <text x={ann.pixelx - intrinsicSize.width/2 + 15/zoom} y={ann.pixely - intrinsicSize.height/2 - 15/zoom} fill={selectedAnnotation === ann ? "#60a5fa" : "#fbbf24"} fontSize={Math.max(12, 16/zoom)} className="font-black drop-shadow-xl select-none group-hover:fill-white transition-all" style={{ paintOrder: 'stroke', stroke: 'black', strokeWidth: 3/zoom }}>{ann.names[0]}</text>
-                        </g>
-                    ))}
-                    {metadata?.wcs && (() => {
-                        try {
-                          const projectedList = getProjectedConstellations(metadata.wcs, lang);
-                          return projectedList.map((c) => (
-                            <g key={c.id} className="opacity-75 pointer-events-none">
-                              {c.lines.map((line, idx) => (
-                                <line
-                                  key={idx}
-                                  x1={line.x1 - intrinsicSize.width / 2}
-                                  y1={line.y1 - intrinsicSize.height / 2}
-                                  x2={line.x2 - intrinsicSize.width / 2}
-                                  y2={line.y2 - intrinsicSize.height / 2}
-                                  stroke="#22d3ee"
-                                  strokeWidth={Math.max(1, 1.5 / zoom)}
-                                  strokeDasharray={`${Math.max(2, 4 / zoom)},${Math.max(2, 4 / zoom)}`}
-                                />
-                              ))}
-                              {c.starDots.map((dot, idx) => (
-                                <circle
-                                  key={idx}
-                                  cx={dot.x - intrinsicSize.width / 2}
-                                  cy={dot.y - intrinsicSize.height / 2}
-                                  r={Math.max(2, 3 / zoom)}
-                                  fill="#22d3ee"
-                                />
-                              ))}
-                              {c.center && (
-                                <text
-                                  x={c.center.x - intrinsicSize.width / 2}
-                                  y={c.center.y - intrinsicSize.height / 2}
-                                  fill="#22d3ee"
-                                  fontSize={Math.max(11, 14 / zoom)}
-                                  fontWeight="black"
-                                  textAnchor="middle"
-                                  className="select-none opacity-90"
-                                  style={{ paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.8)', strokeWidth: Math.max(1, 2.7 / zoom) }}
-                                >
-                                  {c.name}
-                                </text>
-                              )}
-                            </g>
-                          ));
-                        } catch (err) {
-                          console.debug("Constellation projection error:", err);
-                          return null;
-                        }
-                    })()}
-                    {searchedObject && searchedObject.pixelx !== undefined && searchedObject.pixely !== undefined && (
-                        <g className="pointer-events-auto cursor-pointer" onClick={(e) => { e.stopPropagation(); handleSelectObject({ ...searchedObject, names: [searchedObject.name] } as any); }}>
-                            <path d={`M ${searchedObject.pixelx - intrinsicSize.width/2 - 20/zoom} ${searchedObject.pixely - intrinsicSize.height/2} L ${searchedObject.pixelx - intrinsicSize.width/2 + 20/zoom} ${searchedObject.pixely - intrinsicSize.height/2} M ${searchedObject.pixelx - intrinsicSize.width/2} ${searchedObject.pixely - intrinsicSize.height/2 - 20/zoom} L ${searchedObject.pixelx - intrinsicSize.width/2} ${searchedObject.pixely - intrinsicSize.height/2 + 20/zoom}`} stroke="#3b82f6" strokeWidth={4/zoom} />
-                            <circle cx={searchedObject.pixelx - intrinsicSize.width/2} cy={searchedObject.pixely - intrinsicSize.height/2} r={30/zoom} fill="none" stroke="#3b82f6" strokeWidth={2/zoom} strokeDasharray="4,4" className="animate-[spin_10s_linear_infinite]" />
-                            <text x={searchedObject.pixelx - intrinsicSize.width/2} y={searchedObject.pixely - intrinsicSize.height/2 + 50/zoom} fill="#3b82f6" fontSize={Math.max(14, 20/zoom)} className="font-black text-center" textAnchor="middle" style={{ paintOrder: 'stroke', stroke: 'black', strokeWidth: 3/zoom }}>{searchedObject.name}</text>
-                        </g>
-                    )}
-                    <defs><mask id="m"><rect x="-50%" y="-50%" width="200%" height="200%" fill="white" />{allSelections.map((s,i) => <polygon key={i} points={s.map(p=>`${p.x - intrinsicSize.width/2},${p.y - intrinsicSize.height/2}`).join(' ')} fill="black" />)}</mask></defs>
-                    {allSelections.length > 0 && <rect x="-50%" y="-50%" width="200%" height="200%" fill="rgba(0,0,0,0.5)" mask="url(#m)" className="pointer-events-none" />}
-                    {allSelections.map((s,i) => <polygon key={i} points={s.map(p=>`${p.x - intrinsicSize.width/2},${p.y - intrinsicSize.height/2}`).join(' ')} fill="rgba(59,130,246,0.1)" stroke="white" strokeWidth={2/zoom} strokeDasharray="4,4" className="pointer-events-none" />)}
-                    {currentLasso.length > 1 && <polyline points={currentLasso.map(p=>`${p.x - intrinsicSize.width/2},${p.y - intrinsicSize.height/2}`).join(' ')} fill="none" stroke="white" strokeWidth={2/zoom} strokeDasharray="4,4" className="pointer-events-none" />}
-                 </svg>
-              </div>
+              {pdfFileUrl ? (
+                <div className="absolute inset-4 flex items-center justify-center bg-gray-950 z-[105]">
+                  <iframe 
+                    src={pdfFileUrl} 
+                    className="w-full h-full rounded-2xl border border-white/10 shadow-2xl bg-white"
+                    title={fileEntry ? fileEntry.name : 'PDF Document'}
+                  />
+                </div>
+              ) : (
+                <div style={{ position: 'absolute', left: '50%', top: '50%', width: intrinsicSize.width, height: intrinsicSize.height, marginLeft: -intrinsicSize.width / 2, marginTop: -intrinsicSize.height / 2, transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`, transition: (isDrawing || isPanning) ? 'none' : 'transform 0.15s ease-out' }}>
+                   <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block' }} />
+                   <svg className="absolute inset-0 overflow-visible pointer-events-none" viewBox={`${-intrinsicSize.width/2} ${-intrinsicSize.height/2} ${intrinsicSize.width} ${intrinsicSize.height}`}>
+                      {showAnnotations && annotations.map((ann, i) => (
+                          <g key={i} className="cursor-pointer group pointer-events-auto" onClick={(e) => { e.stopPropagation(); handleSelectObject(ann); }}>
+                              <circle cx={ann.pixelx - intrinsicSize.width/2} cy={ann.pixely - intrinsicSize.height/2} r={Math.max(10, 18/zoom)} fill="none" stroke={selectedAnnotation === ann ? "#60a5fa" : "#fbbf24"} strokeWidth={3/zoom} className="group-hover:stroke-blue-400 group-hover:r-[22/zoom] transition-all" />
+                              <text x={ann.pixelx - intrinsicSize.width/2 + 15/zoom} y={ann.pixely - intrinsicSize.height/2 - 15/zoom} fill={selectedAnnotation === ann ? "#60a5fa" : "#fbbf24"} fontSize={Math.max(12, 16/zoom)} className="font-black drop-shadow-xl select-none group-hover:fill-white transition-all" style={{ paintOrder: 'stroke', stroke: 'black', strokeWidth: 3/zoom }}>{ann.names[0]}</text>
+                          </g>
+                      ))}
+                      {metadata?.wcs && (() => {
+                          try {
+                            const projectedList = getProjectedConstellations(metadata.wcs, lang);
+                            return projectedList.map((c) => (
+                              <g key={c.id} className="opacity-75 pointer-events-none">
+                                {c.lines.map((line, idx) => (
+                                  <line
+                                    key={idx}
+                                    x1={line.x1 - intrinsicSize.width / 2}
+                                    y1={line.y1 - intrinsicSize.height / 2}
+                                    x2={line.x2 - intrinsicSize.width / 2}
+                                    y2={line.y2 - intrinsicSize.height / 2}
+                                    stroke="#22d3ee"
+                                    strokeWidth={Math.max(1, 1.5 / zoom)}
+                                    strokeDasharray={`${Math.max(2, 4 / zoom)},${Math.max(2, 4 / zoom)}`}
+                                  />
+                                ))}
+                                {c.starDots.map((dot, idx) => (
+                                  <circle
+                                    key={idx}
+                                    cx={dot.x - intrinsicSize.width / 2}
+                                    cy={dot.y - intrinsicSize.height / 2}
+                                    r={Math.max(2, 3 / zoom)}
+                                    fill="#22d3ee"
+                                  />
+                                ))}
+                                {c.center && (
+                                  <text
+                                    x={c.center.x - intrinsicSize.width / 2}
+                                    y={c.center.y - intrinsicSize.height / 2}
+                                    fill="#22d3ee"
+                                    fontSize={Math.max(11, 14 / zoom)}
+                                    fontWeight="black"
+                                    textAnchor="middle"
+                                    className="select-none opacity-90"
+                                    style={{ paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.8)', strokeWidth: Math.max(1, 2.7 / zoom) }}
+                                  >
+                                    {c.name}
+                                  </text>
+                                )}
+                              </g>
+                            ));
+                          } catch (err) {
+                            console.debug("Constellation projection error:", err);
+                            return null;
+                          }
+                      })()}
+                      {searchedObject && searchedObject.pixelx !== undefined && searchedObject.pixely !== undefined && (
+                          <g className="pointer-events-auto cursor-pointer" onClick={(e) => { e.stopPropagation(); handleSelectObject({ ...searchedObject, names: [searchedObject.name] } as any); }}>
+                              <path d={`M ${searchedObject.pixelx - intrinsicSize.width/2 - 20/zoom} ${searchedObject.pixely - intrinsicSize.height/2} L ${searchedObject.pixelx - intrinsicSize.width/2 + 20/zoom} ${searchedObject.pixely - intrinsicSize.height/2} M ${searchedObject.pixelx - intrinsicSize.width/2} ${searchedObject.pixely - intrinsicSize.height/2 - 20/zoom} L ${searchedObject.pixelx - intrinsicSize.width/2} ${searchedObject.pixely - intrinsicSize.height/2 + 20/zoom}`} stroke="#3b82f6" strokeWidth={4/zoom} />
+                              <circle cx={searchedObject.pixelx - intrinsicSize.width/2} cy={searchedObject.pixely - intrinsicSize.height/2} r={30/zoom} fill="none" stroke="#3b82f6" strokeWidth={2/zoom} strokeDasharray="4,4" className="animate-[spin_10s_linear_infinite]" />
+                              <text x={searchedObject.pixelx - intrinsicSize.width/2} y={searchedObject.pixely - intrinsicSize.height/2 + 50/zoom} fill="#3b82f6" fontSize={Math.max(14, 20/zoom)} className="font-black text-center" textAnchor="middle" style={{ paintOrder: 'stroke', stroke: 'black', strokeWidth: 3/zoom }}>{searchedObject.name}</text>
+                          </g>
+                      )}
+                      <defs><mask id="m"><rect x="-50%" y="-50%" width="200%" height="200%" fill="white" />{allSelections.map((s,i) => <polygon key={i} points={s.map(p=>`${p.x - intrinsicSize.width/2},${p.y - intrinsicSize.height/2}`).join(' ')} fill="black" />)}</mask></defs>
+                      {allSelections.length > 0 && <rect x="-50%" y="-50%" width="200%" height="200%" fill="rgba(0,0,0,0.5)" mask="url(#m)" className="pointer-events-none" />}
+                      {allSelections.map((s,i) => <polygon key={i} points={s.map(p=>`${p.x - intrinsicSize.width/2},${p.y - intrinsicSize.height/2}`).join(' ')} fill="rgba(59,130,246,0.1)" stroke="white" strokeWidth={2/zoom} strokeDasharray="4,4" className="pointer-events-none" />)}
+                      {currentLasso.length > 1 && <polyline points={currentLasso.map(p=>`${p.x - intrinsicSize.width/2},${p.y - intrinsicSize.height/2}`).join(' ')} fill="none" stroke="white" strokeWidth={2/zoom} strokeDasharray="4,4" className="pointer-events-none" />}
+                   </svg>
+                </div>
+              )}
 
               {/* ズームOverlay (右下の丸ボタン群) */}
-              <div className="absolute right-6 bottom-6 flex flex-col gap-3 z-[110]">
-                  <button onClick={() => setZoom(z => z * 1.25)} className="p-4 bg-gray-900/90 backdrop-blur-xl border border-white/10 rounded-full hover:bg-white/10 text-gray-500 hover:text-white transition-all shadow-2xl active:scale-90" title={t.zoomIn}><ZoomIn size={24}/></button>
-                  <button onClick={() => handleFitToScreen(intrinsicSize.width, intrinsicSize.height)} className="p-4 bg-gray-900/90 backdrop-blur-xl border border-white/10 rounded-full hover:bg-white/10 text-gray-500 hover:text-white transition-all shadow-2xl active:scale-90" title={t.fitToScreen}><Maximize size={24}/></button>
-                  <button onClick={() => setZoom(z => z / 1.25)} className="p-4 bg-gray-900/90 backdrop-blur-xl border border-white/10 rounded-full hover:bg-white/10 text-gray-500 hover:text-white transition-all shadow-2xl active:scale-90" title={t.zoomOut}><ZoomOut size={24}/></button>
-              </div>
+              {!pdfFileUrl && (
+                <div className="absolute right-6 bottom-6 flex flex-col gap-3 z-[110]">
+                    <button onClick={() => setZoom(z => z * 1.25)} className="p-4 bg-gray-900/90 backdrop-blur-xl border border-white/10 rounded-full hover:bg-white/10 text-gray-500 hover:text-white transition-all shadow-2xl active:scale-90" title={t.zoomIn}><ZoomIn size={24}/></button>
+                    <button onClick={() => handleFitToScreen(intrinsicSize.width, intrinsicSize.height)} className="p-4 bg-gray-900/90 backdrop-blur-xl border border-white/10 rounded-full hover:bg-white/10 text-gray-500 hover:text-white transition-all shadow-2xl active:scale-90" title={t.fitToScreen}><Maximize size={24}/></button>
+                    <button onClick={() => setZoom(z => z / 1.25)} className="p-4 bg-gray-900/90 backdrop-blur-xl border border-white/10 rounded-full hover:bg-white/10 text-gray-500 hover:text-white transition-all shadow-2xl active:scale-90" title={t.zoomOut}><ZoomOut size={24}/></button>
+                </div>
+              )}
+
+              {videoElement && (
+                  <div className="absolute left-6 bottom-6 right-24 bg-gray-950/85 backdrop-blur-md border border-white/10 rounded-2xl p-4 flex items-center gap-4 z-[120] shadow-2xl">
+                     <button type="button" onClick={handlePlayPause} className="p-3 bg-blue-600 hover:bg-blue-500 rounded-full text-white transition-all active:scale-90 flex items-center justify-center cursor-pointer pointer-events-auto">
+                        {isVideoPlaying ? <Pause size={18}/> : <Play size={18}/>}
+                     </button>
+                     <input 
+                        type="range" 
+                        min={0} 
+                        max={videoDuration || 1} 
+                        step={0.01} 
+                        value={videoCurrentTime} 
+                        onChange={handleSeek} 
+                        className="flex-1 accent-blue-500 bg-white/10 h-1.5 rounded-lg cursor-pointer pointer-events-auto"
+                     />
+                     <span className="text-[10px] font-mono text-gray-400 select-none">
+                        {videoCurrentTime.toFixed(1)}s / {videoDuration.toFixed(1)}s
+                     </span>
+                  </div>
+              )}
           </div>
           {activePanel !== 'none' && (
               <div className={`bg-gray-900 overflow-y-auto no-scrollbar shadow-2xl z-40 shrink-0 ${isPortrait ? 'w-full h-1/2 border-t border-white/5' : 'w-80 h-full border-l border-white/5'}`}>
@@ -802,7 +1096,9 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({ fileEntry, isOpen, o
                                   <div className="space-y-3">
                                       <h4 className="text-[8px] font-black text-gray-600 uppercase tracking-[0.2em]">{t.savedPrompts}</h4>
                                       <div className="flex flex-wrap gap-2">
-                                          {savedPrompts.map((p, i) => <button key={i} onClick={() => setAiPrompt(p)} className="px-3 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-[9px] font-medium border border-white/5 truncate max-w-full text-left">{p}</button>)}
+                                          {savedPrompts.map((p, i) => (
+                                              <button key={i} onClick={() => setAiPrompt(p)} className="px-3 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-[9px] font-medium border border-white/5 truncate max-w-full text-left">{p}</button>
+                                          ))}
                                       </div>
                                   </div>
                               )}
@@ -815,11 +1111,17 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({ fileEntry, isOpen, o
                       )}
                       {activePanel === 'metadata' && (
                           <div className="space-y-6">
-                              {(metadata?.astro || metadata?.gps) && (
+                              {(metadata?.astro || metadata?.gps || true) && (
                                 <div className="grid grid-cols-1 gap-2">
-                                  {metadata.gps && <a href={getMapLink(metadata.gps)} target="_blank" className="flex items-center justify-center gap-2 p-3 bg-green-600/20 border border-green-500/20 rounded-xl text-[9px] font-black uppercase text-green-400 hover:bg-green-600/30 transition-all"><MapIcon size={14}/> {t.showMap}</a>}
-                                  {metadata.astro?.objectName && <a href={getSimBadLink(metadata.astro.objectName)} target="_blank" className="flex items-center justify-center gap-2 p-3 bg-blue-600/20 border border-blue-500/20 rounded-xl text-[9px] font-black uppercase text-blue-400 hover:bg-blue-600/30 transition-all"><ExternalLink size={14}/> {t.openSimbadLink}</a>}
-                                  {metadata.astro?.ra && metadata.astro?.dec && <a href={getAladinLink(metadata.astro)} target="_blank" className="flex items-center justify-center gap-2 p-3 bg-indigo-600/20 border border-indigo-500/20 rounded-xl text-[9px] font-black uppercase text-indigo-400 hover:bg-indigo-600/30 transition-all"><ExternalLink size={14}/> {t.openAladin}</a>}
+                                  <button 
+                                    onClick={handleGetGPSLocation} 
+                                    className="flex items-center justify-center gap-2 p-3 bg-blue-600/20 border border-blue-500/20 rounded-xl text-[9px] font-black uppercase text-blue-400 hover:bg-blue-600/30 transition-all cursor-pointer"
+                                  >
+                                    <MapPin size={14}/> {lang === 'ja' ? 'GPS現在地から観測地を同期' : 'Sync Location from GPS'}
+                                  </button>
+                                  {metadata?.gps && <a href={getMapLink(metadata.gps)} target="_blank" className="flex items-center justify-center gap-2 p-3 bg-green-600/20 border border-green-500/20 rounded-xl text-[9px] font-black uppercase text-green-400 hover:bg-green-600/30 transition-all"><MapIcon size={14}/> {t.showMap}</a>}
+                                  {metadata?.astro?.objectName && <a href={getSimBadLink(metadata.astro.objectName)} target="_blank" className="flex items-center justify-center gap-2 p-3 bg-blue-600/20 border border-blue-500/20 rounded-xl text-[9px] font-black uppercase text-blue-400 hover:bg-blue-600/30 transition-all"><ExternalLink size={14}/> {t.openSimbadLink}</a>}
+                                  {metadata?.astro?.ra && metadata?.astro?.dec && <a href={getAladinLink(metadata.astro)} target="_blank" className="flex items-center justify-center gap-2 p-3 bg-indigo-600/20 border border-indigo-500/20 rounded-xl text-[9px] font-black uppercase text-indigo-400 hover:bg-indigo-600/30 transition-all"><ExternalLink size={14}/> {t.openAladin}</a>}
                                 </div>
                               )}
                               <div className="space-y-8">

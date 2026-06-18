@@ -9,16 +9,21 @@ interface SettingsModalProps {
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, translations }) => {
   const [apiKey, setApiKey] = useState('');
+  const [model, setModel] = useState('gemini-3.5-flash');
   const [showSaved, setShowSaved] = useState(false);
   const t = translations.preview;
 
   useEffect(() => {
     const savedKey = localStorage.getItem('gemini_api_key');
     if (savedKey) setApiKey(savedKey);
+
+    const savedModel = localStorage.getItem('gemini_model');
+    if (savedModel) setModel(savedModel);
   }, [isOpen]);
 
   const handleSave = () => {
     localStorage.setItem('gemini_api_key', apiKey);
+    localStorage.setItem('gemini_model', model);
     setShowSaved(true);
     setTimeout(() => {
       setShowSaved(false);
@@ -66,6 +71,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, t
               >
                 キーを取得する <ExternalLink size={10} />
               </a>
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <label className="flex items-center gap-2 text-xs font-bold text-gray-400 uppercase tracking-wider">
+              優先 AI モデル / 503対策
+            </label>
+            <select
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              className="w-full bg-gray-950 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-all cursor-pointer"
+            >
+              <option value="gemini-3.5-flash">gemini-3.5-flash (推薦: 最新・高解像度)</option>
+              <option value="gemini-2.5-flash">gemini-2.5-flash (超高速・高安定性・503回避)</option>
+              <option value="gemini-2.5-pro">gemini-2.5-pro (大容量・高知能)</option>
+            </select>
+            <p className="text-[10px] text-gray-400 leading-relaxed">
+              選択したモデルが高負荷などでエラーを返した場合、自動的に他の候補を順に試して処理を完了する「フォールバック機能」が自動で働きます。
             </p>
           </div>
 

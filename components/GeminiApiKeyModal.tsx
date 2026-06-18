@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Eye, EyeOff, Key } from 'lucide-react';
-import { getApiKey as getUnifiedApiKey } from '../services/geminiService';
+import { Eye, EyeOff, Key, X } from 'lucide-react';
+import { getApiKey as getUnifiedApiKey, isValidApiKeyFormat } from '../services/geminiService';
 
 interface GeminiApiKeyModalProps {
   onClose?: () => void;
@@ -9,6 +9,7 @@ interface GeminiApiKeyModalProps {
 
 export const GeminiApiKeyModal: React.FC<GeminiApiKeyModalProps> = ({ onClose, lang = 'ja' }) => {
   const [apiKey, setApiKey] = useState('');
+  const [model, setModel] = useState('gemini-3.1-flash-image');
   const [showKey, setShowKey] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -19,20 +20,37 @@ export const GeminiApiKeyModal: React.FC<GeminiApiKeyModalProps> = ({ onClose, l
     const params = new URLSearchParams(window.location.search);
     const setApiKeyParam = params.get('set_api_key');
     
+    const savedKey = localStorage.getItem('gemini_api_key');
     const activeKey = getUnifiedApiKey();
     const hasActiveKey = !!(activeKey && activeKey.trim());
+    
+    const savedModel = localStorage.getItem('gemini_model');
+    if (savedModel) {
+      setModel(savedModel);
+    }
+    
+    if (savedKey) {
+      setApiKey(savedKey);
+    }
     
     if (setApiKeyParam === 'true') {
       setIsReconfigMode(true);
       setIsOpen(true);
-      const savedKey = localStorage.getItem('gemini_api_key');
-      if (savedKey) {
-        setApiKey(savedKey);
-      }
     } else if (!hasActiveKey) {
       setIsOpen(true);
     }
   }, []);
+
+  const handleClose = () => {
+    setIsOpen(false);
+    setErrorMsg('');
+    const url = new URL(window.location.href);
+    url.searchParams.delete('set_api_key');
+    window.history.replaceState({}, '', url.toString());
+    if (onClose) {
+      onClose();
+    }
+  };
 
   const handleSave = () => {
     const trimmed = apiKey.trim();
@@ -41,8 +59,8 @@ export const GeminiApiKeyModal: React.FC<GeminiApiKeyModalProps> = ({ onClose, l
       return;
     }
     
-    // プレフィックスチェックに捕まりすぎて、有効な異なる構造のキーを弾く不具合を回避します
-    if (!trimmed.startsWith('AIzaSy') && trimmed.length < 20) {
+    // プレフィックスチェックおよび一貫したキー判定を行うため、共通の検証ヘルパーを使用します
+    if (!isValidApiKeyFormat(trimmed)) {
       setErrorMsg(
         lang === 'ja'
           ? '無効なAPIキーフォーマットの可能性があります。AIzaSyから始まる正しいキーを入力してください。'
@@ -52,15 +70,14 @@ export const GeminiApiKeyModal: React.FC<GeminiApiKeyModalProps> = ({ onClose, l
     }
 
     localStorage.setItem('gemini_api_key', trimmed);
+    localStorage.setItem('gemini_model', model);
     setIsOpen(false);
     setErrorMsg('');
     
-    // Remove query parameter cleanly from URL
     const url = new URL(window.location.href);
     url.searchParams.delete('set_api_key');
     window.history.replaceState({}, '', url.toString());
     
-    // API設定の完全リセットと最速適用のため、保存時は常にリロードをトリガーします。
     if (onClose) {
       onClose();
     }
@@ -75,7 +92,15 @@ export const GeminiApiKeyModal: React.FC<GeminiApiKeyModalProps> = ({ onClose, l
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/85 backdrop-blur-md px-4">
-      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0c1017]/95 p-6 shadow-2xl text-white">
+      <div className="relative w-full max-w-md rounded-2xl border border-white/10 bg-[#0c1017]/95 p-6 shadow-2xl text-white animate-in zoom-in-95 duration-200">
+        <button 
+          onClick={handleClose} 
+          className="absolute right-4 top-4 p-1.5 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white transition-colors" 
+          title={lang === 'ja' ? '閉じる' : 'Close'}
+        >
+          <X size={18} />
+        </button>
+        
         <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
           <Key className="text-blue-500 animate-pulse" size={22} />
           {lang === 'ja' ? 'Gemini API キー設定' : 'Gemini API Key Settings'}
@@ -124,16 +149,34 @@ Your API key is securely protected solely in your browser, and will never be sen
           </button>
         </div>
 
+        <div className="mb-6 space-y-1.5">
+          <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
+            {lang === 'ja' ? '天体画像処理 API モデル' : 'Astronomical Processing API Model'}
+          </label>
+          <select
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            className="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-xs text-white focus:outline-none focus:border-blue-500/50 transition-colors cursor-pointer"
+          >
+            <option value="gemini-3.1-flash-image">Nano Banana 2 (gemini-3.1-flash-image - デフォルト)</option>
+            <option value="gemini-3-pro-image-preview">Nano Banana Pro (gemini-3-pro-image-preview)</option>
+            <option value="gemini-2.5-flash-image">Nano Banana (gemini-2.5-flash-image)</option>
+          </select>
+          <p className="text-[9px] text-gray-500 leading-relaxed text-gray-400">
+            {lang === 'ja' 
+              ? '※モデルが高負荷等でエラーを返した場合、自動的に他の候補を試行（フォールバック）します。'
+              : '*Automated fallback behavior triggers if the selected model fails.'}
+          </p>
+        </div>
+
         <div className="flex gap-3">
-          {!isReconfigMode && (
-            <button
-              id="gemini-api-key-get-button"
-              onClick={handleGetApiKey}
-              className="flex-1 py-3 text-xs font-bold rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 transition-all text-gray-300"
-            >
-              {lang === 'ja' ? 'API取得' : 'Get API Key'}
-            </button>
-          )}
+          <button
+            id="gemini-api-key-get-button"
+            onClick={handleGetApiKey}
+            className="flex-1 py-3 text-xs font-bold rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 transition-all text-gray-300"
+          >
+            {lang === 'ja' ? 'API取得 (Google AI Studio)' : 'Get Key (Google AI Studio)'}
+          </button>
           <button
             id="gemini-api-key-register-button"
             onClick={handleSave}
