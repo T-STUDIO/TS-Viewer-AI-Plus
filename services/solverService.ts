@@ -455,28 +455,16 @@ export class AstrometryService {
           if (aOrder !== undefined) {
               wcsObj['CTYPE1'] = 'RA---TAN-SIP';
               wcsObj['CTYPE2'] = 'DEC--TAN-SIP';
-              
-              const extractSipFromObj = (obj: any) => {
-                  if (!obj || typeof obj !== 'object') return;
-                  for (const key of Object.keys(obj)) {
-                      const keyUpper = key.toUpperCase();
-                      if (
-                          keyUpper === 'A_ORDER' || keyUpper === 'B_ORDER' || keyUpper === 'AP_ORDER' || keyUpper === 'BP_ORDER' ||
-                          /^A_\d+_\d+$/.test(keyUpper) || /^B_\d+_\d+$/.test(keyUpper) ||
-                          /^AP_\d+_\d+$/.test(keyUpper) || /^BP_\d+_\d+$/.test(keyUpper)
-                      ) {
-                          const val = obj[key];
-                          if (val !== undefined && !isNaN(Number(val))) {
-                              wcsObj[keyUpper] = Number(val);
-                          }
-                      }
-                  }
-              };
-
-              // Extract from nested levels of JSON response
-              extractSipFromObj(json);
-              extractSipFromObj(json.wcs);
-              extractSipFromObj(json.calibration);
+              const sipKeys = [
+                  'A_ORDER', 'A_0_2', 'A_1_1', 'A_2_0', 'A_0_3', 'A_1_2', 'A_2_1', 'A_3_0',
+                  'B_ORDER', 'B_0_2', 'B_1_1', 'B_2_0', 'B_0_3', 'B_1_2', 'B_2_1', 'B_3_0',
+                  'AP_ORDER', 'AP_0_1', 'AP_0_2', 'AP_1_0', 'AP_1_1', 'AP_2_0',
+                  'BP_ORDER', 'BP_0_1', 'BP_0_2', 'BP_1_0', 'BP_1_1', 'BP_2_0'
+              ];
+              sipKeys.forEach(k => {
+                  const val = findValRaw(json, [`wcs.${k}`, k, `calibration.${k}`]);
+                  if (val !== undefined) wcsObj[k] = Number(val);
+              });
           }
           
           // アノテーションの取得
@@ -576,24 +564,25 @@ export function wrapWcsForRendering(fitsWcs: Record<string, any>): Record<string
             const stack = new Error().stack || '';
 
             // 1. 外部アプリ保存・シリアライズ用コンテキストの検出
-            // FITSファイルの出力(writeFits, generateFitsHeaderString)、外部連携WCS(getWcsHeader)、Aladin用URL生成(getAladinLink)など、
-            // 物理的な WCS 生データを他システムに渡すコンテキストのみを正確にフィルタリングします。
+            // FITSファイルの出力(writeFits, generateFitsHeaderString)、外部連携WCS(getWcsHeader)、
+            // あるいは同期シリアライズ処理(isSerializing)の最中である場合、外部アプリ用の完璧な WCS 生データ値を返す。
             const isExternalApp = 
                 isSerializing || 
-                /writeFits|generateFitsHeaderString|fitsUtils|getWcsHeader|getAladinLink|Aladin/i.test(stack);
+                /writeFits|generateFitsHeaderString|fitsUtils|getWcsHeader/i.test(stack);
 
             if (isExternalApp) {
                 return getExternalAppValue(String(prop), target);
             }
 
-            // 2. 画面描画用へのデフォルトフォールバック
-            // 最適化やインライン化によってコールスタックから関数名が省略された場合も、
-            // 画面の「星、星座線、アノテーション」が 100% 正しく位置合わせされるように、
-            // デフォルトでは描画用の補正・反転値を適用します。
-            if (propStr.startsWith('CRPIX') || propStr.startsWith('CD')) {
+            // 2. 星座線および画面描画（worldToPixel等での位置計算）用コンテキストの検出
+            const isRendering = 
+                /worldToPixel|pixelToWorld|metadataUtils|getProjectedConstellations|drawConstellations|Annotation/i.test(stack);
+
+            if (isRendering && (propStr.startsWith('CRPIX') || propStr.startsWith('CD'))) {
                 return getConstellationValue(String(prop), target);
             }
 
+            // それ以外の通常のアクセス、あるいは直接プロパティを取得する汎用ケースは標準ターゲットデータを返す
             return Reflect.get(target, prop, receiver);
         },
         ownKeys(target) {

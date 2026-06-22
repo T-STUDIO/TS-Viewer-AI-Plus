@@ -1,5 +1,3 @@
-import { applySipDistortion } from './sipService';
-
 export interface MetadataItem {
     key: string;
     value: string | number;
@@ -140,8 +138,7 @@ export function getFitsMetadata(header: Record<string, any> | string): Extracted
 
     const WCS_STRICT_PREFIXES = [
       'CRVAL', 'CRPIX', 'CTYPE', 'CD', 'PC', 'PV', 'CROTA', 'LONPOLE', 
-      'LATPOLE', 'WCSNAME', 'EQUINOX', 'RADESYS', 'CDELT', 'CUNIT', 'CD1_', 'CD2_',
-      'A_', 'B_', 'AP_', 'BP_'
+      'LATPOLE', 'WCSNAME', 'EQUINOX', 'RADESYS', 'CDELT', 'CUNIT', 'CD1_', 'CD2_'
     ];
     const SUMMARY_KEYS = [
       'RA', 'DEC', 'RA_CENTER', 'DEC_CENTER', 'CENTER_RA', 'CENTER_DEC', 
@@ -228,11 +225,9 @@ export function worldToPixel(ra: number, dec: number, wcs: Record<string, any>):
     const dx = (xi_deg * cd22 - eta_deg * cd12) / det;
     const dy = (eta_deg * cd11 - xi_deg * cd21) / det;
 
-    const { dx: corrDx, dy: corrDy } = applySipDistortion(dx, dy, wcs);
-
     return {
-        x: corrDx + wcs.CRPIX1,
-        y: corrDy + wcs.CRPIX2
+        x: dx + wcs.CRPIX1,
+        y: dy + wcs.CRPIX2
     };
 }
 
