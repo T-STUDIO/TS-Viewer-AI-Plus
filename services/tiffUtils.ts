@@ -57,7 +57,8 @@ export async function renderTiffToCanvas(file: Blob, canvas: HTMLCanvasElement) 
  */
 export function writeTiff(
     imageData: ImageData, 
-    description: string
+    description: string,
+    fitsHeader?: string
 ): Blob {
     const width = imageData.width;
     const height = imageData.height;
@@ -81,13 +82,15 @@ export function writeTiff(
     // 282 XResolution (RATIONAL) -> Offset
     // 283 YResolution (RATIONAL) -> Offset
     // 296 ResolutionUnit (SHORT) = 2 (Inch)
+    // 50838 FITSHeader (ASCII) -> Offset
     
-    const entriesCount = 13;
+    const fitsHeaderBytes = fitsHeader ? new TextEncoder().encode(fitsHeader + '\0') : null;
+    const entriesCount = fitsHeaderBytes ? 14 : 13;
     const ifdSize = 2 + (entriesCount * 12) + 4;
     const headerSize = 8;
     
     // Calc Offsets
-    // Order: Header -> IFD -> BitsPerSample Values -> Resolution Values -> Description String -> Image Data
+    // Order: Header -> IFD -> BitsPerSample Values -> Resolution Values -> Description String -> FitsHeader String -> Image Data
     let offset = headerSize + ifdSize;
     
     const bitsPerSampleOffset = offset;
@@ -104,6 +107,13 @@ export function writeTiff(
     offset += descBytes.length;
     // Pad to word boundary? Not strictly required for basic parsers, but good practice.
     if (offset % 2 !== 0) offset++;
+    
+    let fitsHeaderOffset = 0;
+    if (fitsHeaderBytes) {
+        fitsHeaderOffset = offset;
+        offset += fitsHeaderBytes.length;
+        if (offset % 2 !== 0) offset++;
+    }
     
     const stripOffset = offset;
     const imageByteCount = width * height * 3;
@@ -156,6 +166,9 @@ export function writeTiff(
     writeEntry(282, 5, 1, xResOffset); // XResolution
     writeEntry(283, 5, 1, yResOffset); // YResolution
     writeEntry(296, 3, 1, 2); // ResolutionUnit (Inch)
+    if (fitsHeaderBytes) {
+        writeEntry(50838, 2, fitsHeaderBytes.length, fitsHeaderOffset); // FITSHeader (ASCII)
+    }
     
     writeLong(ifdOffset, 0); // Next IFD (0)
     
@@ -174,6 +187,12 @@ export function writeTiff(
     // Description
     const descView = new Uint8Array(buffer, descOffset, descBytes.length);
     descView.set(descBytes);
+    
+    // Fits Header
+    if (fitsHeaderBytes) {
+        const fitsView = new Uint8Array(buffer, fitsHeaderOffset, fitsHeaderBytes.length);
+        fitsView.set(fitsHeaderBytes);
+    }
     
     // 4. Image Data (RGB from RGBA)
     const imgStart = stripOffset;
