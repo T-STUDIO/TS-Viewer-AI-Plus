@@ -309,22 +309,40 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({ fileEntry, isOpen, o
         let blob: Blob | null = null;
         const wcsData = metadata?.wcs || {};
         
-        const wcsString = generateFitsHeaderString(canvas.width, canvas.height, wcsData, true, true);
+        // Proxyを剥がした生のWCSデータを確実に取得して使用する（外部連携・保存の不具合を防止）
+        const rawWcs = wcsData['__RAW_FITS_WCS__'] || wcsData;
 
         if (format === 'fits') {
             const idata = ctx!.getImageData(0, 0, canvas.width, canvas.height).data;
-            const planeSize = canvas.width * canvas.height;
+            const width = canvas.width;
+            const height = canvas.height;
+            const planeSize = width * height;
             const floatData = new Float32Array(planeSize * 3);
-            for(let i=0; i<planeSize; i++) {
-                floatData[i] = idata[i*4];               // R plane
-                floatData[i + planeSize] = idata[i*4+1];   // G plane
-                floatData[i + 2 * planeSize] = idata[i*4+2]; // B plane
+            
+            for (let y = 0; y < height; y++) {
+                const srcY = y;
+                const destY = height - 1 - y; // ボトムアップ順に上下反転して格納
+                for (let x = 0; x < width; x++) {
+                    const srcIdx = (srcY * width + x) * 4;
+                    const destIdx = destY * width + x;
+                    
+                    floatData[destIdx] = idata[srcIdx];                 // R plane
+                    floatData[destIdx + planeSize] = idata[srcIdx + 1];   // G plane
+                    floatData[destIdx + 2 * planeSize] = idata[srcIdx + 2]; // B plane
+                }
             }
-            blob = writeFits(floatData, canvas.width, canvas.height, wcsData, 3);
+            // FITSはボトムアップ形式で画像が保存されるため、WCSヘッダーも反転なしの元のrawWcsを渡す
+            blob = writeFits(floatData, width, height, rawWcs, 3);
         } else if (format === 'tiff') {
+            // TIFFはトップダウン形式のため、WCSヘッダーは Y 反転（flipY = true）を指定して生成
+            const wcsString = generateFitsHeaderString(canvas.width, canvas.height, rawWcs, true, true);
+            // Astro-TIFF用に改行なし（includeNewlines = false）の FITS ヘッダーブロック（Y反転あり）
+            const fitsHeaderBlock = generateFitsHeaderString(canvas.width, canvas.height, rawWcs, false, true);
             const idata = ctx!.getImageData(0, 0, canvas.width, canvas.height);
-            blob = writeTiff(idata, wcsString);
+            blob = writeTiff(idata, wcsString, fitsHeaderBlock);
         } else if (format === 'jpeg') {
+            // JPEGはトップダウン形式のため、WCSヘッダーは Y 反転（flipY = true）を指定して生成
+            const wcsString = generateFitsHeaderString(canvas.width, canvas.height, rawWcs, true, true);
             const tempBlob = await new Promise<Blob>(r => canvas.toBlob(r!, 'image/jpeg', 0.95));
             blob = await injectJpegComment(tempBlob, wcsString);
         } else if (format === 'psd') {
