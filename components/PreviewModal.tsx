@@ -309,7 +309,7 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({ fileEntry, isOpen, o
         let blob: Blob | null = null;
         const wcsData = metadata?.wcs || {};
         
-        const wcsString = generateFitsHeaderString(canvas.width, canvas.height, wcsData, true);
+        const wcsString = generateFitsHeaderString(canvas.width, canvas.height, wcsData, true, true);
 
         if (format === 'fits') {
             const idata = ctx!.getImageData(0, 0, canvas.width, canvas.height).data;
