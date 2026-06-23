@@ -121,8 +121,20 @@ export function formatFitsRecord(key: string, value: any): string {
  * Generates a full Pseudo-FITS header string starting with SIMPLE=T.
  * This ensures maximum compatibility across all image formats.
  */
-export function generateFitsHeaderString(width: number, height: number, wcsData: Record<string, any>, includeNewlines: boolean = false): string {
+export function generateFitsHeaderString(width: number, height: number, wcsData: Record<string, any>, includeNewlines: boolean = false, flipY: boolean = false): string {
     const naxis = wcsData['NAXIS'] || 2;
+    const adjustedWcs = { ...wcsData };
+
+    if (flipY) {
+        // Adjust CRPIX2 and CD matrix values mathematically for top-down coordinate systems (flipY = true)
+        if (adjustedWcs['CRPIX2'] !== undefined) {
+            adjustedWcs['CRPIX2'] = height + 1 - Number(adjustedWcs['CRPIX2']);
+        }
+        if (adjustedWcs['CD1_2'] !== undefined) adjustedWcs['CD1_2'] = -Number(adjustedWcs['CD1_2']);
+        if (adjustedWcs['CD2_2'] !== undefined) adjustedWcs['CD2_2'] = -Number(adjustedWcs['CD2_2']);
+        if (adjustedWcs['CDELT2'] !== undefined) adjustedWcs['CDELT2'] = -Number(adjustedWcs['CDELT2']);
+    }
+
     const lines: string[] = [
       formatFitsRecord("SIMPLE", true), 
       formatFitsRecord("BITPIX", -32), 
@@ -130,13 +142,13 @@ export function generateFitsHeaderString(width: number, height: number, wcsData:
       formatFitsRecord("NAXIS1", width), 
       formatFitsRecord("NAXIS2", height)
     ];
-    if (naxis > 2 && wcsData['NAXIS3']) {
-        lines.push(formatFitsRecord("NAXIS3", wcsData['NAXIS3']));
+    if (naxis > 2 && adjustedWcs['NAXIS3']) {
+        lines.push(formatFitsRecord("NAXIS3", adjustedWcs['NAXIS3']));
     }
     lines.push(formatFitsRecord("EXTEND", true));
     
     const ignore = ['SIMPLE', 'BITPIX', 'NAXIS', 'NAXIS1', 'NAXIS2', 'NAXIS3', 'END', 'BSCALE', 'BZERO', 'EXTEND'];
-    for (const [key, val] of Object.entries(wcsData)) {
+    for (const [key, val] of Object.entries(adjustedWcs)) {
         if (!ignore.includes(key.toUpperCase())) {
             lines.push(formatFitsRecord(key, val));
         }
