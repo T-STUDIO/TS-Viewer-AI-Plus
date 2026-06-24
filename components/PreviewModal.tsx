@@ -142,6 +142,67 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({ fileEntry, isOpen, o
     return new Blob([view.slice(0, 2), new Uint8Array(marker), commentBytes, view.slice(2)], { type: 'image/jpeg' });
   };
 
+  const makeCrcTable = (): Uint32Array => {
+    const cTable = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+        let c = n;
+        for (let k = 0; k < 8; k++) {
+            c = ((c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1));
+        }
+        cTable[n] = c;
+    }
+    return cTable;
+  };
+
+  const crcTable = makeCrcTable();
+
+  const crc32 = (bytes: Uint8Array): number => {
+    let crc = 0xFFFFFFFF;
+    for (let i = 0; i < bytes.length; i++) {
+        crc = crcTable[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+    }
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+  };
+
+  const injectPngComment = async (blob: Blob, comment: string): Promise<Blob> => {
+    const buffer = await blob.arrayBuffer();
+    const view = new Uint8Array(buffer);
+    if (view[0] !== 0x89 || view[1] !== 0x50 || view[2] !== 0x4E || view[3] !== 0x47) return blob;
+    if (view[12] !== 0x49 || view[13] !== 0x48 || view[14] !== 0x44 || view[15] !== 0x52) return blob;
+    const ihdrLen = (view[8] << 24) | (view[9] << 16) | (view[10] << 8) | view[11];
+    const ihdrEnd = 8 + 4 + 4 + ihdrLen + 4;
+    
+    const keyword = "Comment";
+    const keywordBytes = new TextEncoder().encode(keyword);
+    const textBytes = new TextEncoder().encode(comment);
+    const chunkDataLen = keywordBytes.length + 1 + textBytes.length;
+    const chunkBytes = new Uint8Array(4 + 4 + chunkDataLen + 4);
+    
+    chunkBytes[0] = (chunkDataLen >> 24) & 0xFF;
+    chunkBytes[1] = (chunkDataLen >> 16) & 0xFF;
+    chunkBytes[2] = (chunkDataLen >> 8) & 0xFF;
+    chunkBytes[3] = chunkDataLen & 0xFF;
+    
+    chunkBytes[4] = 0x74; // 't'
+    chunkBytes[5] = 0x45; // 'E'
+    chunkBytes[6] = 0x58; // 'X'
+    chunkBytes[7] = 0x74; // 't'
+    
+    chunkBytes.set(keywordBytes, 8);
+    chunkBytes[8 + keywordBytes.length] = 0x00;
+    chunkBytes.set(textBytes, 8 + keywordBytes.length + 1);
+    
+    const crcTarget = chunkBytes.slice(4, 4 + 4 + chunkDataLen);
+    const crcVal = crc32(crcTarget);
+    const crcOffset = 8 + chunkDataLen;
+    chunkBytes[crcOffset] = (crcVal >> 24) & 0xFF;
+    chunkBytes[crcOffset + 1] = (crcVal >> 16) & 0xFF;
+    chunkBytes[crcOffset + 2] = (crcVal >> 8) & 0xFF;
+    chunkBytes[crcOffset + 3] = crcVal & 0xFF;
+    
+    return new Blob([view.slice(0, ihdrEnd), chunkBytes, view.slice(ihdrEnd)], { type: 'image/png' });
+  };
+
   const handleClose = () => {
     if (isDirty) {
       const msg = lang === 'ja' ? '変更内容が破棄されます。プレビューを閉じてもよろしいですか？' : 'Unsaved changes will be discarded. Close anyway?';
@@ -337,7 +398,10 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({ fileEntry, isOpen, o
             // TIFFはトップダウン形式のため、WCSヘッダーは Y 反転（flipY = true）を指定して生成
             const wcsString = generateFitsHeaderString(canvas.width, canvas.height, rawWcs, true, true);
             // Astro-TIFF用に改行なし（includeNewlines = false）の FITS ヘッダーブロック（Y反転あり）
-            const fitsHeaderBlock = generateFitsHeaderString(canvas.width, canvas.height, rawWcs, false, true);
+            let fitsHeaderBlock = generateFitsHeaderString(canvas.width, canvas.height, rawWcs, false, true);
+            // FITSHeaderタグを2880バイトの倍数（FITSの1ブロック単位）にパディングして完全なFITSヘッダーブロック形式にする
+            const padCount = (2880 - (fitsHeaderBlock.length % 2880)) % 2880;
+            fitsHeaderBlock += "".padEnd(padCount, ' ');
             const idata = ctx!.getImageData(0, 0, canvas.width, canvas.height);
             blob = writeTiff(idata, wcsString, fitsHeaderBlock);
         } else if (format === 'jpeg') {
@@ -345,6 +409,11 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({ fileEntry, isOpen, o
             const wcsString = generateFitsHeaderString(canvas.width, canvas.height, rawWcs, true, true);
             const tempBlob = await new Promise<Blob>(r => canvas.toBlob(r!, 'image/jpeg', 0.95));
             blob = await injectJpegComment(tempBlob, wcsString);
+        } else if (format === 'png') {
+            // PNGはトップダウン形式のため、WCSヘッダーは Y 反転（flipY = true）を指定して生成
+            const wcsString = generateFitsHeaderString(canvas.width, canvas.height, rawWcs, true, true);
+            const tempBlob = await new Promise<Blob>(r => canvas.toBlob(r!, 'image/png'));
+            blob = await injectPngComment(tempBlob, wcsString);
         } else if (format === 'psd') {
             if (!(window as any).agPsd) {
                 throw new Error("agPsd is not ready");
