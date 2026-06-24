@@ -82,9 +82,9 @@ export function writeTiff(
     // 282 XResolution (RATIONAL) -> Offset
     // 283 YResolution (RATIONAL) -> Offset
     // 296 ResolutionUnit (SHORT) = 2 (Inch)
-    // 50838 FITSHeader (ASCII) -> Offset
+    // 50838 FITSHeader (BYTE) -> Offset
     
-    const fitsHeaderBytes = fitsHeader ? new TextEncoder().encode(fitsHeader + '\0') : null;
+    const fitsHeaderBytes = fitsHeader ? new TextEncoder().encode(fitsHeader) : null;
     const entriesCount = fitsHeaderBytes ? 14 : 13;
     const ifdSize = 2 + (entriesCount * 12) + 4;
     const headerSize = 8;
@@ -167,7 +167,7 @@ export function writeTiff(
     writeEntry(283, 5, 1, yResOffset); // YResolution
     writeEntry(296, 3, 1, 2); // ResolutionUnit (Inch)
     if (fitsHeaderBytes) {
-        writeEntry(50838, 2, fitsHeaderBytes.length, fitsHeaderOffset); // FITSHeader (ASCII)
+        writeEntry(50838, 1, fitsHeaderBytes.length, fitsHeaderOffset); // FITSHeader (BYTE)
     }
     
     writeLong(ifdOffset, 0); // Next IFD (0)
