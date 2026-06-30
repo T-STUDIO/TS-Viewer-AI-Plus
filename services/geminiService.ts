@@ -21,9 +21,22 @@ export const isValidApiKeyFormat = (key: string | null | undefined): boolean => 
     return false;
   }
 
-  // 最も厳格かつ安全：正規のGemini APIキーは通常 AIzaSy から始まり39文字程度。
-  // AIzaSyから始まり、長さが30文字以上の妥当な文字種（半角英数、アンダースコア、ハイフン）であること。
-  return k.startsWith('AIzaSy') && k.length >= 30 && /^[A-Za-z0-9_-]+$/.test(k);
+  // 1. Bearerトークン / Authorizationキー形式 (Bearer <token>)
+  if (/^bearer\s+\S+/i.test(k)) {
+    return true;
+  }
+
+  // 2. 通常のGemini APIキー (AIzaSyから始まる)
+  if (k.startsWith('AIzaSy') && k.length >= 30 && /^[A-Za-z0-9_-]+$/.test(k)) {
+    return true;
+  }
+
+  // 3. 一般的なカスタムAuthorizationキー、その他のキー形式 (15文字以上で半角英数やハイフン、アンダースコア、スラッシュ、ドット、イコール、プラス等を許容)
+  if (k.length >= 15 && /^[A-Za-z0-9_\-\.\/=\+]+$/.test(k)) {
+    return true;
+  }
+
+  return false;
 };
 
 export const getApiKey = () => {
@@ -58,8 +71,13 @@ export const getFallbackModels = (preferredModel: string): string[] => {
 };
 
 const initAI = (): GoogleGenAI => {
-  const apiKey = getApiKey();
+  let apiKey = getApiKey();
   if (!apiKey) throw new Error("APIキーが設定されていません。");
+
+  // Bearerプレフィックスがある場合は除去して生のキーを抽出します
+  if (/^bearer\s+/i.test(apiKey)) {
+    apiKey = apiKey.replace(/^bearer\s+/i, '').trim();
+  }
 
   return new GoogleGenAI({ apiKey });
 };
