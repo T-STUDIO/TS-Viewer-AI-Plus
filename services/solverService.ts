@@ -564,25 +564,24 @@ export function wrapWcsForRendering(fitsWcs: Record<string, any>): Record<string
             const stack = new Error().stack || '';
 
             // 1. 外部アプリ保存・シリアライズ用コンテキストの検出
-            // FITSファイルの出力(writeFits, generateFitsHeaderString)、外部連携WCS(getWcsHeader)、
-            // あるいは同期シリアライズ処理(isSerializing)の最中である場合、外部アプリ用の完璧な WCS 生データ値を返す。
+            // FITSファイルの出力(writeFits, generateFitsHeaderString)、外部連携WCS(getWcsHeader)、Aladin用URL生成(getAladinLink)など、
+            // 物理的な WCS 生データを他システムに渡すコンテキストのみを正確にフィルタリングします。
             const isExternalApp = 
                 isSerializing || 
-                /writeFits|generateFitsHeaderString|fitsUtils|getWcsHeader/i.test(stack);
+                /writeFits|generateFitsHeaderString|fitsUtils|getWcsHeader|getAladinLink|Aladin/i.test(stack);
 
             if (isExternalApp) {
                 return getExternalAppValue(String(prop), target);
             }
 
-            // 2. 星座線および画面描画（worldToPixel等での位置計算）用コンテキストの検出
-            const isRendering = 
-                /worldToPixel|pixelToWorld|metadataUtils|getProjectedConstellations|drawConstellations|Annotation/i.test(stack);
-
-            if (isRendering && (propStr.startsWith('CRPIX') || propStr.startsWith('CD'))) {
+            // 2. 画面描画用へのデフォルトフォールバック
+            // 最適化やインライン化によってコールスタックから関数名が省略された場合も、
+            // 画面の「星、星座線、アノテーション」が 100% 正しく位置合わせされるように、
+            // デフォルトでは描画用の補正・反転値を適用します。
+            if (propStr.startsWith('CRPIX') || propStr.startsWith('CD')) {
                 return getConstellationValue(String(prop), target);
             }
 
-            // それ以外の通常のアクセス、あるいは直接プロパティを取得する汎用ケースは標準ターゲットデータを返す
             return Reflect.get(target, prop, receiver);
         },
         ownKeys(target) {

@@ -53,6 +53,10 @@ export const helpContent: Record<'ja' | 'en', HelpSection> = {
       {
         title: "強力な外部天体データベース & プロポータル連携",
         description: "投影されたアノテーションをクリックすると詳細カードが展開され、天体説明の「Wikipedia日本語自動要約」が表示されます。さらにプロの天文学者・ハイアマチュアが活用する、インタラクティブ宇宙望遠鏡マップ「Aladin Lite」、世界標準プロ天体データベース「SIMBAD」、および各種天体詳細情報（Wikipedia全文など）へ瞬時に座標や名前を連携してジャンプできます。"
+      },
+      {
+        title: "GPS観測地同期＆地図マッピング",
+        description: "Plate Solvingパネル内の「GPS現在地から観測地を同期」を使用すると、ブラウザのGeolocation APIを安全に呼び出し、現在の緯度・経度を測定して観測メタデータ（gps: {lat, lng}）へ自動反映します。観測メタデータに緯度経度情報が含まれる場合、外部地図サービス（Google Maps）へ瞬時にジャンプして観測地点周辺の星空情報を確認・マッピングすることが容易になります。"
       }
     ],
     controlsTitle: "🎛️ ボタン・コントロール機能一覧・説明",
@@ -144,6 +148,14 @@ export const helpContent: Record<'ja' | 'en', HelpSection> = {
       {
         name: "保存 / エクスポート (Save Button)",
         description: "現像調整、AI補正、またはスタッキングによって新規作成された、現在プレビューに写っている「天体画像」を、ご希望の保存形式（JPEG、TIFF、FITS）を選択してローカルへ保存ダウンロードします。"
+      },
+      {
+        name: "GPS現在地から観測地を同期 (Sync Location from GPS)",
+        description: "クリックするとブラウザの現在位置測位（GPS/ネットワーク測位）を要求し、測定された緯度・経度を天体画像の観測地メタデータへワンクリックで自動同期します。屋外遠征での撮影記録作成に最適です。"
+      },
+      {
+        name: "地図で位置を確認 (Show Map)",
+        description: "画像メタデータに緯度経度（観測地）情報が含まれている場合に現れるボタンです。クリックするとGoogle Mapsが新しいタブで開き、天体がどこから撮影・観測されたかを視覚的に地球上のマップで特定・確認できます。"
       }
     ],
     formatsTitle: "💾 対応書き込み・読み込みファイル形式",
@@ -201,6 +213,10 @@ export const helpContent: Record<'ja' | 'en', HelpSection> = {
       {
         title: "Deep Astrophysical Database Integrations",
         description: "Clicking on any projected annotation marker expands a highly informative target detailed card. The card queries Wikipedia to provide an automatic digest summary in your chosen language, and features precise one-click external hyperlink jumps to premium databases: the professional astronomer's standard database SIMBAD, Aladin Lite Interactive Sky Map, and regional chart sites."
+      },
+      {
+        title: "GPS Location Sync & Interactive Mapping",
+        description: "Uses the secure browser Geolocation API to dynamically fetch your current precise latitude/longitude, immediately syncing it back to your active image observation metadata. If location metadata exists, a secure Google Maps hyperlink lets you instantly evaluate exactly where in the world the sub-exposure was successfully integrated."
       }
     ],
     controlsTitle: "🎛️ Complete Icons, Buttons, and Sliders Control Guide",
@@ -292,6 +308,14 @@ export const helpContent: Record<'ja' | 'en', HelpSection> = {
       {
         name: "Download / Export Image (Save Button)",
         description: "Takes the current frame configuration (including adjustments, crop state, Stack result, or AI edits) and downloads it in JPEG, TIFF, or FITS format as preferred."
+      },
+      {
+        name: "Sync Location from GPS (MapPin Button)",
+        description: "Queries your browser's current GPS coordinate system to directly load your local outdoor coordinates, applying them to the image metadata for rapid outdoor logging."
+      },
+      {
+        name: "Show Map (Map Icon Button)",
+        description: "Appears dynamically when accurate coordinates exist in your picture metadata. Opens an external tab to Google Maps, showing exactly where on Earth the active astronomical frame was recorded."
       }
     ],
     formatsTitle: "💾 Detailed Read and Write File Formats Reference",

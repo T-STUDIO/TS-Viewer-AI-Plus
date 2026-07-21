@@ -212,15 +212,12 @@ export function getProjectedConstellations(
     
     // Project all stars of this constellation first
     const starCoords: Record<string, { x: number; y: number }> = {};
-    const imgHeight = wcs.IMAGEH || wcs.NAXIS2 || 0;
 
     for (const [key, star] of Object.entries(constel.stars)) {
       const pix = worldToPixel(star.ra, star.dec, wcs);
       if (pix) {
-        const correctedY = imgHeight ? (imgHeight - pix.y) : pix.y;
-        const finalPix = { x: pix.x, y: correctedY };
-        starCoords[key] = finalPix;
-        starDots.push({ x: finalPix.x, y: finalPix.y, name: star.name });
+        starCoords[key] = pix;
+        starDots.push({ x: pix.x, y: pix.y, name: star.name });
       }
     }
 

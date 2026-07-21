@@ -155,7 +155,7 @@ export function generateFitsHeaderString(width: number, height: number, wcsData:
     }
     lines.push(formatFitsRecord("END", ""));
     
-    return includeNewlines ? lines.join('\n') : lines.join('');
+    return includeNewlines ? lines.join('\r\n') : lines.join('');
 }
 
 export function writeFits(data: Float32Array, width: number, height: number, header: Record<string, string | number | boolean>, planes: number = 1): Blob {
